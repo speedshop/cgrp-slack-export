@@ -1,0 +1,9 @@
+# Local build/runtime artifacts
+.venv-sev/
+viewer-site/
+*.pyc
+__pycache__/
+
+# Slack export data (local only)
+archive/
+imports/

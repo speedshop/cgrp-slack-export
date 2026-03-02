@@ -1,0 +1,231 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+require "json"
+require "fileutils"
+require "tmpdir"
+
+begin
+  require "zip"
+rescue LoadError
+  abort "Missing dependency: rubyzip. Run `bundle install` first."
+end
+
+class SlackExportMerger
+  DATE_FILE = /\A\d{4}-\d{2}-\d{2}\.json\z/
+  EXCLUDED_CHANNELS = %w[random introductions].freeze
+
+  def initialize(input_path, archive_path)
+    @input_path = File.expand_path(input_path)
+    @archive_path = File.expand_path(archive_path)
+    @temp_dir = nil
+  end
+
+  def run
+    source_root = load_source_root
+    FileUtils.mkdir_p(@archive_path)
+    purge_excluded_channels
+
+    merge_index_file(source_root, "users.json")
+    merge_index_file(source_root, "channels.json")
+    merge_channel_messages(source_root)
+
+    puts "✅ Merge complete: #{@archive_path}"
+  ensure
+    FileUtils.remove_entry(@temp_dir) if @temp_dir && Dir.exist?(@temp_dir)
+  end
+
+  private
+
+  def load_source_root
+    if File.directory?(@input_path)
+      return find_export_root(@input_path)
+    end
+
+    unless File.file?(@input_path) && File.extname(@input_path).downcase == ".zip"
+      abort "Input must be a Slack export ZIP or unzipped directory: #{@input_path}"
+    end
+
+    @temp_dir = Dir.mktmpdir("slack-export-")
+    extract_zip(@input_path, @temp_dir)
+    find_export_root(@temp_dir)
+  end
+
+  def find_export_root(path)
+    return path if export_root?(path)
+
+    matches = Dir.glob(File.join(path, "**", "users.json")).map { |file| File.dirname(file) }
+    root = matches.find { |dir| export_root?(dir) }
+    return root if root
+
+    abort "Could not find users.json + channels.json in export: #{path}"
+  end
+
+  def export_root?(path)
+    File.exist?(File.join(path, "users.json")) && File.exist?(File.join(path, "channels.json"))
+  end
+
+  def extract_zip(zip_path, destination)
+    root = File.expand_path(destination)
+
+    Zip::File.open(zip_path) do |zip_file|
+      zip_file.each do |entry|
+        target = File.expand_path(File.join(root, entry.name))
+        next unless target.start_with?("#{root}#{File::SEPARATOR}")
+
+        if entry.directory?
+          FileUtils.mkdir_p(target)
+          next
+        end
+
+        FileUtils.mkdir_p(File.dirname(target))
+        entry.get_input_stream do |stream|
+          File.binwrite(target, stream.read)
+        end
+      end
+    end
+  end
+
+  def merge_index_file(source_root, file_name)
+    source = File.join(source_root, file_name)
+    return unless File.exist?(source)
+
+    target = File.join(@archive_path, file_name)
+    existing = read_json_array(target)
+    incoming = read_json_array(source)
+
+    if file_name == "channels.json"
+      existing = filter_excluded_channels(existing)
+      incoming = filter_excluded_channels(incoming)
+    end
+
+    merged = merge_by_id(existing, incoming)
+    write_json(target, merged)
+
+    puts "Merged #{file_name}: #{existing.length} -> #{merged.length}"
+  end
+
+  def merge_by_id(existing, incoming)
+    merged_by_id = {}
+    no_id = []
+
+    existing.each do |row|
+      id = row["id"]
+      id ? merged_by_id[id] = row : no_id << row
+    end
+
+    incoming.each do |row|
+      id = row["id"]
+      id ? merged_by_id[id] = row : no_id << row
+    end
+
+    sorted = merged_by_id.keys.sort.map { |id| merged_by_id[id] }
+    sorted + no_id.uniq
+  end
+
+  def merge_channel_messages(source_root)
+    channel_dirs = Dir.children(source_root).select do |entry|
+      File.directory?(File.join(source_root, entry)) && !excluded_channel?(entry)
+    end
+
+    channel_dirs.sort.each do |channel|
+      source_dir = File.join(source_root, channel)
+      daily_files = Dir.children(source_dir).grep(DATE_FILE).sort
+      next if daily_files.empty?
+
+      target_dir = File.join(@archive_path, channel)
+      FileUtils.mkdir_p(target_dir)
+
+      puts "Channel #{channel}: #{daily_files.length} files"
+      daily_files.each { |file| merge_daily_file(channel, source_dir, target_dir, file) }
+    end
+  end
+
+  def merge_daily_file(channel, source_dir, target_dir, file_name)
+    source_file = File.join(source_dir, file_name)
+    target_file = File.join(target_dir, file_name)
+
+    existing = read_json_array(target_file)
+    incoming = read_json_array(source_file)
+    merged = merge_messages(existing, incoming)
+
+    write_json(target_file, merged)
+    puts "  #{channel}/#{file_name}: #{existing.length} + #{incoming.length} => #{merged.length}"
+  end
+
+  def merge_messages(existing, incoming)
+    by_ts = {}
+    no_ts = []
+
+    existing.each do |message|
+      ts = message["ts"]
+      ts ? by_ts[ts] = message : no_ts << message
+    end
+
+    incoming.each do |message|
+      ts = message["ts"]
+      ts ? by_ts[ts] = message : no_ts << message
+    end
+
+    sorted = by_ts.values.sort_by { |message| ts_key(message["ts"]) }
+    sorted + no_ts.uniq.sort_by { |message| JSON.generate(message) }
+  end
+
+  def excluded_channel?(name)
+    EXCLUDED_CHANNELS.include?(name)
+  end
+
+  def filter_excluded_channels(channels)
+    channels.reject { |channel| excluded_channel?(channel["name"]) }
+  end
+
+  def purge_excluded_channels
+    EXCLUDED_CHANNELS.each do |channel|
+      dir = File.join(@archive_path, channel)
+      next unless Dir.exist?(dir)
+
+      FileUtils.remove_dir(dir)
+      puts "Removed excluded channel directory: #{channel}"
+    end
+
+    channels_file = File.join(@archive_path, "channels.json")
+    return unless File.exist?(channels_file)
+
+    channels = read_json_array(channels_file)
+    filtered = filter_excluded_channels(channels)
+    return if filtered.length == channels.length
+
+    write_json(channels_file, filtered)
+    puts "Removed excluded channels from channels.json"
+  end
+
+  def ts_key(ts)
+    seconds, fractional = ts.to_s.split(".", 2)
+    [seconds.to_i, (fractional || "").ljust(6, "0")]
+  end
+
+  def read_json_array(path)
+    return [] unless File.exist?(path)
+
+    parsed = JSON.parse(File.read(path))
+    return parsed if parsed.is_a?(Array)
+
+    abort "Expected an array JSON file: #{path}"
+  rescue JSON::ParserError => e
+    abort "Invalid JSON in #{path}: #{e.message}"
+  end
+
+  def write_json(path, value)
+    FileUtils.mkdir_p(File.dirname(path))
+    File.write(path, "#{JSON.pretty_generate(value)}\n")
+  end
+end
+
+if ARGV.empty?
+  abort "Usage: ruby bin/merge <slack-export.zip|directory> [archive-path]"
+end
+
+project_root = File.expand_path("..", __dir__)
+archive_path = ARGV[1] || File.join(project_root, "archive")
+
+SlackExportMerger.new(ARGV[0], archive_path).run

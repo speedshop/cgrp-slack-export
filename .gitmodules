@@ -1,0 +1,3 @@
+[submodule "vendor/slack-export-viewer"]
+	path = vendor/slack-export-viewer
+	url = https://github.com/speedshop/slack-export-viewer.git

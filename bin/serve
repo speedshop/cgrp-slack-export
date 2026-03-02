@@ -1,0 +1,52 @@
+#!/usr/bin/env fish
+
+set -l script_dir (cd (dirname (status -f)); pwd)
+set -l project_root (cd "$script_dir/.."; pwd)
+set -l archive_dir "$project_root/archive"
+set -l output_dir "$project_root/viewer-site"
+set -l output_index "$output_dir/index.html"
+set -l viewer_venv "$project_root/.venv-sev"
+set -l viewer_submodule "$project_root/vendor/slack-export-viewer"
+set -l viewer "$viewer_venv/bin/slack-export-viewer"
+
+if not test -d "$archive_dir"
+    gum style --foreground 196 "archive/ does not exist yet. Run: ruby bin/merge <export.zip>"
+    exit 1
+end
+
+if not test -d "$viewer_submodule"
+    gum style --foreground 196 "Missing submodule: vendor/slack-export-viewer"
+    gum style --foreground 244 "Run: git submodule update --init --recursive"
+    exit 1
+end
+
+if not test -x "$viewer"
+    if not command -q python3
+        gum style --foreground 196 "python3 is required to bootstrap local viewer"
+        exit 1
+    end
+
+    gum style --foreground 212 "Bootstrapping local slack-export-viewer venv"
+    python3 -m venv "$viewer_venv"
+    "$viewer_venv/bin/pip" install --upgrade pip >/dev/null
+    "$viewer_venv/bin/pip" install -e "$viewer_submodule"
+end
+
+set -l running (pgrep -f 'slack-export-viewer|slackviewer.app')
+if test -n "$running"
+    gum style --foreground 244 "Stopping running slack-export-viewer processes"
+    kill $running >/dev/null 2>&1
+end
+
+gum style --foreground 212 "Building static viewer site"
+gum style --foreground 244 "Output: $output_dir"
+"$viewer" -z "$archive_dir" --html-only -o "$output_dir" --no-browser
+
+if not test -f "$output_index"
+    gum style --foreground 196 "Build failed: $output_index not found"
+    exit 1
+end
+
+gum style --foreground 82 "Opening static viewer"
+gum style --foreground 244 "file://$output_index"
+open "$output_index"

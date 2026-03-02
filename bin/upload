@@ -1,0 +1,34 @@
+#!/usr/bin/env fish
+
+set -l script_dir (cd (dirname (status -f)); pwd)
+set -l project_root (cd "$script_dir/.."; pwd)
+set -l archive_dir "$project_root/archive"
+set -l zip_path "$project_root/railsperf-export-latest.zip"
+
+set -l bucket (set -q R2_BUCKET; and echo $R2_BUCKET; or echo railsperf-exports)
+set -l object_key (set -q R2_OBJECT_KEY; and echo $R2_OBJECT_KEY; or echo railsperf-export-latest.zip)
+
+if not test -d "$archive_dir"
+    gum style --foreground 196 "archive/ not found. Merge an export first."
+    exit 1
+end
+
+if not set -q R2_ACCOUNT_ID
+    gum style --foreground 196 "Missing R2_ACCOUNT_ID"
+    exit 1
+end
+
+if not command -q aws
+    gum style --foreground 196 "aws CLI is required for upload"
+    exit 1
+end
+
+gum style --foreground 212 "Creating ZIP from archive/"
+cd "$archive_dir"
+zip -r "$zip_path" . >/dev/null
+cd "$project_root"
+
+gum style --foreground 212 "Uploading to R2"
+aws s3 cp "$zip_path" "s3://$bucket/$object_key" --endpoint-url "https://$R2_ACCOUNT_ID.r2.cloudflarestorage.com"
+
+gum style --foreground 82 "Upload complete"
