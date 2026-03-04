@@ -1,52 +1,59 @@
-#!/usr/bin/env fish
+#!/usr/bin/env bash
+set -euo pipefail
 
-set -l script_dir (cd (dirname (status -f)); pwd)
-set -l project_root (cd "$script_dir/.."; pwd)
-set -l archive_dir "$project_root/archive"
-set -l output_dir "$project_root/viewer-site"
-set -l output_index "$output_dir/index.html"
-set -l viewer_venv "$project_root/.venv-sev"
-set -l viewer_submodule "$project_root/vendor/slack-export-viewer"
-set -l viewer "$viewer_venv/bin/slack-export-viewer"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/.." && pwd)"
+build_script="$script_dir/build"
+dist_dir="$project_root/dist"
+output_index="$dist_dir/index.html"
+markdown_export="$dist_dir/archive.md"
 
-if not test -d "$archive_dir"
-    gum style --foreground 196 "archive/ does not exist yet. Run: ruby bin/merge <export.zip>"
-    exit 1
-end
+open_browser=1
+for arg in "$@"; do
+  case "$arg" in
+    --no-open)
+      open_browser=0
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: bin/serve [--no-open]
 
-if not test -d "$viewer_submodule"
-    gum style --foreground 196 "Missing submodule: vendor/slack-export-viewer"
-    gum style --foreground 244 "Run: git submodule update --init --recursive"
-    exit 1
-end
+If dist/index.html or dist/archive.md are missing, runs bin/build.
+Then opens dist/index.html when possible.
+EOF
+      exit 0
+      ;;
+    *)
+      printf 'Error: unknown argument: %s\n' "$arg" >&2
+      exit 1
+      ;;
+  esac
+done
 
-if not test -x "$viewer"
-    if not command -q python3
-        gum style --foreground 196 "python3 is required to bootstrap local viewer"
-        exit 1
-    end
+if [ ! -x "$build_script" ]; then
+  printf 'Error: missing executable: bin/build\n' >&2
+  exit 1
+fi
 
-    gum style --foreground 212 "Bootstrapping local slack-export-viewer venv"
-    python3 -m venv "$viewer_venv"
-    "$viewer_venv/bin/pip" install --upgrade pip >/dev/null
-    "$viewer_venv/bin/pip" install -e "$viewer_submodule"
-end
+if [ ! -f "$output_index" ] || [ ! -s "$markdown_export" ]; then
+  "$build_script"
+else
+  printf 'dist outputs already exist; skipping build\n'
+fi
 
-set -l running (pgrep -f 'slack-export-viewer|slackviewer.app')
-if test -n "$running"
-    gum style --foreground 244 "Stopping running slack-export-viewer processes"
-    kill $running >/dev/null 2>&1
-end
+if [ ! -f "$output_index" ]; then
+  printf 'Error: missing build output: %s\n' "$output_index" >&2
+  exit 1
+fi
 
-gum style --foreground 212 "Building static viewer site"
-gum style --foreground 244 "Output: $output_dir"
-"$viewer" -z "$archive_dir" --html-only -o "$output_dir" --no-browser
+printf 'Static viewer: file://%s\n' "$output_index"
 
-if not test -f "$output_index"
-    gum style --foreground 196 "Build failed: $output_index not found"
-    exit 1
-end
+if [ "$open_browser" -eq 0 ]; then
+  exit 0
+fi
 
-gum style --foreground 82 "Opening static viewer"
-gum style --foreground 244 "file://$output_index"
-open "$output_index"
+if command -v xdg-open >/dev/null 2>&1; then
+  xdg-open "$output_index" >/dev/null 2>&1 &
+elif command -v open >/dev/null 2>&1; then
+  open "$output_index"
+fi

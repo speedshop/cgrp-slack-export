@@ -1,231 +1,298 @@
-#!/usr/bin/env ruby
-# frozen_string_literal: true
+#!/usr/bin/env python3
 
-require "json"
-require "fileutils"
-require "tmpdir"
+import json
+import os
+import re
+import shutil
+import sys
+import tempfile
+import zipfile
 
-begin
-  require "zip"
-rescue LoadError
-  abort "Missing dependency: rubyzip. Run `bundle install` first."
-end
+DATE_FILE = re.compile(r"^\d{4}-\d{2}-\d{2}\.json$")
+EXCLUDED_CHANNELS = {"random", "introductions"}
 
-class SlackExportMerger
-  DATE_FILE = /\A\d{4}-\d{2}-\d{2}\.json\z/
-  EXCLUDED_CHANNELS = %w[random introductions].freeze
 
-  def initialize(input_path, archive_path)
-    @input_path = File.expand_path(input_path)
-    @archive_path = File.expand_path(archive_path)
-    @temp_dir = nil
-  end
+def abort(message: str) -> None:
+    print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(1)
 
-  def run
-    source_root = load_source_root
-    FileUtils.mkdir_p(@archive_path)
-    purge_excluded_channels
 
-    merge_index_file(source_root, "users.json")
-    merge_index_file(source_root, "channels.json")
-    merge_channel_messages(source_root)
+def canonical_json(value) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
-    puts "✅ Merge complete: #{@archive_path}"
-  ensure
-    FileUtils.remove_entry(@temp_dir) if @temp_dir && Dir.exist?(@temp_dir)
-  end
 
-  private
+def read_json_array(path: str):
+    if not os.path.exists(path):
+        return []
 
-  def load_source_root
-    if File.directory?(@input_path)
-      return find_export_root(@input_path)
-    end
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            parsed = json.load(handle)
+    except json.JSONDecodeError as exc:
+        abort(f"Invalid JSON in {path}: {exc}")
 
-    unless File.file?(@input_path) && File.extname(@input_path).downcase == ".zip"
-      abort "Input must be a Slack export ZIP or unzipped directory: #{@input_path}"
-    end
+    if isinstance(parsed, list):
+        return parsed
 
-    @temp_dir = Dir.mktmpdir("slack-export-")
-    extract_zip(@input_path, @temp_dir)
-    find_export_root(@temp_dir)
-  end
+    abort(f"Expected an array JSON file: {path}")
 
-  def find_export_root(path)
-    return path if export_root?(path)
 
-    matches = Dir.glob(File.join(path, "**", "users.json")).map { |file| File.dirname(file) }
-    root = matches.find { |dir| export_root?(dir) }
-    return root if root
+def write_json(path: str, value) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
 
-    abort "Could not find users.json + channels.json in export: #{path}"
-  end
 
-  def export_root?(path)
-    File.exist?(File.join(path, "users.json")) && File.exist?(File.join(path, "channels.json"))
-  end
+def export_root(path: str) -> bool:
+    return (
+        os.path.isfile(os.path.join(path, "users.json"))
+        and os.path.isfile(os.path.join(path, "channels.json"))
+    )
 
-  def extract_zip(zip_path, destination)
-    root = File.expand_path(destination)
 
-    Zip::File.open(zip_path) do |zip_file|
-      zip_file.each do |entry|
-        target = File.expand_path(File.join(root, entry.name))
-        next unless target.start_with?("#{root}#{File::SEPARATOR}")
+def find_export_root(path: str) -> str:
+    if export_root(path):
+        return path
 
-        if entry.directory?
-          FileUtils.mkdir_p(target)
-          next
-        end
+    for root, _, files in os.walk(path):
+        if "users.json" in files and "channels.json" in files:
+            return root
 
-        FileUtils.mkdir_p(File.dirname(target))
-        entry.get_input_stream do |stream|
-          File.binwrite(target, stream.read)
-        end
-      end
-    end
-  end
+    abort(f"Could not find users.json + channels.json in export: {path}")
 
-  def merge_index_file(source_root, file_name)
-    source = File.join(source_root, file_name)
-    return unless File.exist?(source)
 
-    target = File.join(@archive_path, file_name)
+def extract_zip(zip_path: str, destination: str) -> None:
+    root = os.path.abspath(destination)
+    prefix = root + os.sep
+
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        for entry in archive.infolist():
+            target = os.path.abspath(os.path.join(root, entry.filename))
+            if target != root and not target.startswith(prefix):
+                continue
+
+            if entry.is_dir():
+                os.makedirs(target, exist_ok=True)
+                continue
+
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with archive.open(entry, "r") as source, open(target, "wb") as output:
+                shutil.copyfileobj(source, output)
+
+
+def load_source_root(input_path: str):
+    absolute_input = os.path.abspath(input_path)
+
+    if os.path.isdir(absolute_input):
+        return find_export_root(absolute_input), None
+
+    if not os.path.isfile(absolute_input) or not absolute_input.lower().endswith(".zip"):
+        abort(f"Input must be a Slack export ZIP or unzipped directory: {absolute_input}")
+
+    temp_dir = tempfile.mkdtemp(prefix="slack-export-")
+    extract_zip(absolute_input, temp_dir)
+    return find_export_root(temp_dir), temp_dir
+
+
+def excluded_channel(name: str) -> bool:
+    return name in EXCLUDED_CHANNELS
+
+
+def filter_excluded_channels(channels):
+    return [channel for channel in channels if channel.get("name") not in EXCLUDED_CHANNELS]
+
+
+def merge_by_id(existing, incoming):
+    merged_by_id = {}
+    no_id = []
+
+    for row in existing:
+        row_id = row.get("id")
+        if row_id is not None:
+            merged_by_id[row_id] = row
+        else:
+            no_id.append(row)
+
+    for row in incoming:
+        row_id = row.get("id")
+        if row_id is not None:
+            merged_by_id[row_id] = row
+        else:
+            no_id.append(row)
+
+    sorted_rows = [merged_by_id[key] for key in sorted(merged_by_id.keys(), key=lambda x: str(x))]
+
+    unique_no_id = []
+    seen = set()
+    for row in no_id:
+        key = canonical_json(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_no_id.append(row)
+
+    return sorted_rows + unique_no_id
+
+
+def ts_key(ts):
+    raw = "" if ts is None else str(ts)
+    if "." in raw:
+        seconds, fractional = raw.split(".", 1)
+    else:
+        seconds, fractional = raw, ""
+
+    try:
+        seconds_key = int(seconds)
+    except ValueError:
+        seconds_key = 0
+
+    return seconds_key, (fractional + "000000")[:6]
+
+
+def merge_messages(existing, incoming):
+    by_ts = {}
+    no_ts = []
+
+    for message in existing:
+        ts = message.get("ts")
+        if ts is not None:
+            by_ts[str(ts)] = message
+        else:
+            no_ts.append(message)
+
+    for message in incoming:
+        ts = message.get("ts")
+        if ts is not None:
+            by_ts[str(ts)] = message
+        else:
+            no_ts.append(message)
+
+    sorted_messages = sorted(by_ts.values(), key=lambda message: ts_key(message.get("ts")))
+
+    unique_no_ts = {}
+    for message in no_ts:
+        unique_no_ts[canonical_json(message)] = message
+
+    sorted_no_ts = [unique_no_ts[key] for key in sorted(unique_no_ts.keys())]
+    return sorted_messages + sorted_no_ts
+
+
+def purge_excluded_channels(archive_path: str) -> None:
+    for channel in sorted(EXCLUDED_CHANNELS):
+        path = os.path.join(archive_path, channel)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+            print(f"Removed excluded channel directory: {channel}")
+
+    channels_file = os.path.join(archive_path, "channels.json")
+    if not os.path.isfile(channels_file):
+        return
+
+    channels = read_json_array(channels_file)
+    filtered = filter_excluded_channels(channels)
+    if len(filtered) != len(channels):
+        write_json(channels_file, filtered)
+        print("Removed excluded channels from channels.json")
+
+
+def merge_index_file(source_root: str, archive_path: str, file_name: str) -> None:
+    source = os.path.join(source_root, file_name)
+    if not os.path.isfile(source):
+        return
+
+    target = os.path.join(archive_path, file_name)
     existing = read_json_array(target)
     incoming = read_json_array(source)
 
-    if file_name == "channels.json"
-      existing = filter_excluded_channels(existing)
-      incoming = filter_excluded_channels(incoming)
-    end
+    if file_name == "channels.json":
+        existing = filter_excluded_channels(existing)
+        incoming = filter_excluded_channels(incoming)
 
     merged = merge_by_id(existing, incoming)
     write_json(target, merged)
 
-    puts "Merged #{file_name}: #{existing.length} -> #{merged.length}"
-  end
+    print(f"Merged {file_name}: {len(existing)} -> {len(merged)}")
 
-  def merge_by_id(existing, incoming)
-    merged_by_id = {}
-    no_id = []
 
-    existing.each do |row|
-      id = row["id"]
-      id ? merged_by_id[id] = row : no_id << row
-    end
-
-    incoming.each do |row|
-      id = row["id"]
-      id ? merged_by_id[id] = row : no_id << row
-    end
-
-    sorted = merged_by_id.keys.sort.map { |id| merged_by_id[id] }
-    sorted + no_id.uniq
-  end
-
-  def merge_channel_messages(source_root)
-    channel_dirs = Dir.children(source_root).select do |entry|
-      File.directory?(File.join(source_root, entry)) && !excluded_channel?(entry)
-    end
-
-    channel_dirs.sort.each do |channel|
-      source_dir = File.join(source_root, channel)
-      daily_files = Dir.children(source_dir).grep(DATE_FILE).sort
-      next if daily_files.empty?
-
-      target_dir = File.join(@archive_path, channel)
-      FileUtils.mkdir_p(target_dir)
-
-      puts "Channel #{channel}: #{daily_files.length} files"
-      daily_files.each { |file| merge_daily_file(channel, source_dir, target_dir, file) }
-    end
-  end
-
-  def merge_daily_file(channel, source_dir, target_dir, file_name)
-    source_file = File.join(source_dir, file_name)
-    target_file = File.join(target_dir, file_name)
+def merge_daily_file(channel: str, source_dir: str, target_dir: str, file_name: str) -> None:
+    source_file = os.path.join(source_dir, file_name)
+    target_file = os.path.join(target_dir, file_name)
 
     existing = read_json_array(target_file)
     incoming = read_json_array(source_file)
     merged = merge_messages(existing, incoming)
 
     write_json(target_file, merged)
-    puts "  #{channel}/#{file_name}: #{existing.length} + #{incoming.length} => #{merged.length}"
-  end
+    print(f"  {channel}/{file_name}: {len(existing)} + {len(incoming)} => {len(merged)}")
 
-  def merge_messages(existing, incoming)
-    by_ts = {}
-    no_ts = []
 
-    existing.each do |message|
-      ts = message["ts"]
-      ts ? by_ts[ts] = message : no_ts << message
-    end
+def merge_channel_messages(source_root: str, archive_path: str) -> None:
+    channels = []
+    for entry in os.listdir(source_root):
+        entry_path = os.path.join(source_root, entry)
+        if os.path.isdir(entry_path) and not excluded_channel(entry):
+            channels.append(entry)
 
-    incoming.each do |message|
-      ts = message["ts"]
-      ts ? by_ts[ts] = message : no_ts << message
-    end
+    for channel in sorted(channels):
+        source_dir = os.path.join(source_root, channel)
+        daily_files = [
+            entry for entry in sorted(os.listdir(source_dir))
+            if DATE_FILE.match(entry)
+        ]
 
-    sorted = by_ts.values.sort_by { |message| ts_key(message["ts"]) }
-    sorted + no_ts.uniq.sort_by { |message| JSON.generate(message) }
-  end
+        if not daily_files:
+            continue
 
-  def excluded_channel?(name)
-    EXCLUDED_CHANNELS.include?(name)
-  end
+        target_dir = os.path.join(archive_path, channel)
+        os.makedirs(target_dir, exist_ok=True)
 
-  def filter_excluded_channels(channels)
-    channels.reject { |channel| excluded_channel?(channel["name"]) }
-  end
+        print(f"Channel {channel}: {len(daily_files)} files")
+        for file_name in daily_files:
+            merge_daily_file(channel, source_dir, target_dir, file_name)
 
-  def purge_excluded_channels
-    EXCLUDED_CHANNELS.each do |channel|
-      dir = File.join(@archive_path, channel)
-      next unless Dir.exist?(dir)
 
-      FileUtils.remove_dir(dir)
-      puts "Removed excluded channel directory: #{channel}"
-    end
+def usage() -> str:
+    return (
+        "Usage: bin/merge <slack-export.zip|directory> [archive-path]\n\n"
+        "Merges a Slack export into the archive directory."
+    )
 
-    channels_file = File.join(@archive_path, "channels.json")
-    return unless File.exist?(channels_file)
 
-    channels = read_json_array(channels_file)
-    filtered = filter_excluded_channels(channels)
-    return if filtered.length == channels.length
+def main(argv):
+    if argv and argv[0] in {"-h", "--help"}:
+        print(usage())
+        return 0
 
-    write_json(channels_file, filtered)
-    puts "Removed excluded channels from channels.json"
-  end
+    if len(argv) < 1 or len(argv) > 2:
+        print(usage(), file=sys.stderr)
+        return 1
 
-  def ts_key(ts)
-    seconds, fractional = ts.to_s.split(".", 2)
-    [seconds.to_i, (fractional || "").ljust(6, "0")]
-  end
+    input_path = argv[0]
+    archive_path = os.path.abspath(argv[1] if len(argv) == 2 else os.path.join(os.path.dirname(script_dir()), "archive"))
 
-  def read_json_array(path)
-    return [] unless File.exist?(path)
+    source_root = None
+    temp_dir = None
 
-    parsed = JSON.parse(File.read(path))
-    return parsed if parsed.is_a?(Array)
+    try:
+        source_root, temp_dir = load_source_root(input_path)
+        os.makedirs(archive_path, exist_ok=True)
+        purge_excluded_channels(archive_path)
 
-    abort "Expected an array JSON file: #{path}"
-  rescue JSON::ParserError => e
-    abort "Invalid JSON in #{path}: #{e.message}"
-  end
+        merge_index_file(source_root, archive_path, "users.json")
+        merge_index_file(source_root, archive_path, "channels.json")
+        merge_channel_messages(source_root, archive_path)
 
-  def write_json(path, value)
-    FileUtils.mkdir_p(File.dirname(path))
-    File.write(path, "#{JSON.pretty_generate(value)}\n")
-  end
-end
+        print(f"✅ Merge complete: {archive_path}")
+        return 0
+    finally:
+        if temp_dir and os.path.isdir(temp_dir):
+            shutil.rmtree(temp_dir)
 
-if ARGV.empty?
-  abort "Usage: ruby bin/merge <slack-export.zip|directory> [archive-path]"
-end
 
-project_root = File.expand_path("..", __dir__)
-archive_path = ARGV[1] || File.join(project_root, "archive")
+def script_dir() -> str:
+    return os.path.dirname(os.path.abspath(__file__))
 
-SlackExportMerger.new(ARGV[0], archive_path).run
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))
