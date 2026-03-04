@@ -1,124 +1,84 @@
 # Slack Export Archive
 
-Local tooling to maintain a merged Slack export archive and browse it with `slack-export-viewer`.
+Local tooling to maintain a merged Slack export archive, build browsable outputs, and publish the latest export ZIP to Cloudflare R2.
 
-## What this repo contains
+## Repo layout
 
-- `archive/` — merged, living export directory (JSON files by channel/day)
-- `imports/` — raw export ZIPs copied in for reference
-- `bin/merge` — Ruby merge script (ZIP or directory input)
-- `bin/serve` — fish script to launch local viewer
-- `bin/upload` — fish script to zip + upload archive to Cloudflare R2
-- `Gemfile` — ruby dependencies (`rubyzip`)
-- `PLAN.md` — implementation plan and phase-2 notes
+- `archive/` — merged Slack export data (living archive)
+- `imports/` — raw export ZIPs
+- `dist/` — generated viewer + markdown outputs
+- `bin/merge` — merge a Slack export ZIP/dir into `archive/`
+- `bin/build` — build `dist/index.html`, `dist/archive-single.html`, `dist/archive.md`
+- `bin/upload` — package `archive/` and upload to R2
+- `bin/publish` — run merge → build → upload in one command
+- `bin/tf` — run Terraform in `terraform/` with `.env` loaded
+- `terraform/` — Cloudflare R2 bucket IaC
 
-## Included exports
-
-Copied from `~/Documents/Inbox`:
-
-- `imports/full-export-2016-03-05_to_2026-03-01.zip`
-- `imports/monthly-example-2026-01.zip`
-
-## Requirements
-
-- Ruby (with `bundle`)
-- Python 3 (used by `bin/serve` to bootstrap a local venv)
-- fish shell (for `bin/serve`, `bin/upload`)
-- `gum` (for script UI)
-- `aws` CLI (only for `bin/upload`)
-
-## Viewer source of truth
-
-`slack-export-viewer` is vendored as a git submodule:
-
-- path: `vendor/slack-export-viewer`
-- remote: `https://github.com/speedshop/slack-export-viewer`
-
-Initialize/update it with:
+## 1) Setup tools
 
 ```bash
-git submodule update --init --recursive
+bin/setup
 ```
 
-Install ruby deps:
+`bin/setup` checks/installs tools from `mise.toml` (Python, AWS CLI, Pandoc, Terraform), initializes submodules, and checks dependencies.
+
+## 2) Configure secrets with `.env`
 
 ```bash
-bundle install
+cp .env.example .env
 ```
 
-## Merge workflow
+Fill in real values for:
 
-Merge a new Slack export (ZIP or extracted dir) into `archive/`:
+- Cloudflare account + API token (Terraform)
+- R2 upload keypair (Read & Write token)
+- bucket/object names (defaults already set)
+
+`bin/upload` and `bin/tf` automatically load `.env`.
+
+## 3) Create/manage the R2 bucket with Terraform
 
 ```bash
-ruby bin/merge /path/to/export.zip
+bin/tf init
+bin/tf plan
+bin/tf apply
 ```
 
-Optional custom archive target:
+`bin/tf` auto-loads `.env` and runs Terraform in `terraform/`.
+This manages the `railsperf-exports` R2 bucket (or your configured name).
+
+## 4) Monthly workflow
+
+### One-shot publish (recommended)
 
 ```bash
-ruby bin/merge /path/to/export.zip /path/to/archive
+bin/publish imports/monthly-2026-05.zip
 ```
 
-### Merge behavior
+Use `bin/publish --skip-merge` when `archive/` is already up to date and you only want build+upload.
 
-- `users.json` merged by `id` (incoming record wins)
-- `channels.json` merged by `id` (incoming record wins)
-- Channel daily files (`YYYY-MM-DD.json`) merged by message `ts`
-- `#random` and `#introductions` are excluded from archive/build/export output
-- Duplicate `ts` values are replaced by incoming message
-- Output sorted by timestamp
-- Idempotent: rerunning same export does not grow duplicates
+### Or run steps manually
 
-## Build and open local viewer (static files)
-
-```fish
-bin/serve
-```
-
-`bin/serve` now:
-
-1. bootstraps a local venv at `.venv-sev/` (first run only)
-2. installs the submodule version of `slack-export-viewer`
-3. builds a static site to `viewer-site/`
-4. opens `viewer-site/index.html` via `file://`
-
-This avoids running a live local Flask server.
-
-Message order:
-
-- default: newest → oldest
-
-## Upload latest archive to R2
-
-```fish
+```bash
+bin/merge imports/monthly-2026-05.zip
+bin/build
 bin/upload
 ```
 
-This script:
+## Upload behavior
 
-1. zips `archive/` to `railsperf-export-latest.zip`
-2. uploads to `s3://$R2_BUCKET/$R2_OBJECT_KEY`
+`bin/upload` creates `railsperf-export-latest.zip` from `archive/` (falls back to `.tar` if `zip` is unavailable), then uploads via:
 
-Environment variables:
+1. `R2_PRESIGNED_PUT_URL` + `curl`, or
+2. AWS CLI to `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` using:
+   - `R2_ACCOUNT_ID` (or `CLOUDFLARE_ACCOUNT_ID`)
+   - `R2_UPLOAD_ACCESS_KEY_ID`
+   - `R2_UPLOAD_SECRET_ACCESS_KEY`
 
-- required: `R2_ACCOUNT_ID`
-- optional: `R2_BUCKET` (default `railsperf-exports`)
-- optional: `R2_OBJECT_KEY` (default `railsperf-export-latest.zip`)
+## Merge behavior
 
-AWS credentials must already be configured with an R2-compatible token.
-
-## Future public export packaging (notes)
-
-When shipping exports to end users, prefer:
-
-1. static HTML output (single file or multi-file bundle) users can open directly
-2. a short README that explains navigation and search options
-3. optional local search guidance using `qmd` (https://github.com/tobi/qmd)
-
-## Current state (as of implementation)
-
-- `archive/` built and merged from included exports
-- verified repeated merges are idempotent
-- `#random` and `#introductions` are excluded from merge/build output
-- local viewer is static (`file://.../viewer-site/index.html`)
+- `users.json` merged by `id` (incoming wins)
+- `channels.json` merged by `id` (incoming wins)
+- per-day channel files merged by message `ts`
+- excluded channels: `#random`, `#introductions`
+- idempotent when re-merging same export

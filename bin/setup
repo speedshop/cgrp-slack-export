@@ -1,0 +1,179 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/.." && pwd)"
+
+check_only=0
+for arg in "$@"; do
+  case "$arg" in
+    --check-only)
+      check_only=1
+      ;;
+    -h|--help)
+      cat <<'EOF'
+Usage: bin/setup [--check-only]
+
+- Checks project dependencies.
+- If mise is installed, installs tools from mise.toml.
+- Initializes git submodules when needed.
+
+Options:
+  --check-only   Only check/report dependencies (no install actions)
+EOF
+      exit 0
+      ;;
+    *)
+      printf 'Error: unknown argument: %s\n' "$arg" >&2
+      exit 1
+      ;;
+  esac
+done
+
+log() {
+  printf '%s\n' "$*"
+}
+
+warn() {
+  printf 'Warning: %s\n' "$*" >&2
+}
+
+have_mise=0
+if command -v mise >/dev/null 2>&1; then
+  have_mise=1
+fi
+
+have_mise_tool() {
+  local tool="$1"
+  [ "$have_mise" -eq 1 ] || return 1
+  (cd "$project_root" && mise where "$tool" >/dev/null 2>&1)
+}
+
+if [ "$check_only" -eq 0 ] && [ "$have_mise" -eq 1 ] && [ -f "$project_root/mise.toml" ]; then
+  log "mise detected; installing tools from mise.toml"
+  (cd "$project_root" && mise trust "$project_root/mise.toml" >/dev/null 2>&1 || true)
+  (cd "$project_root" && mise install -y)
+elif [ "$check_only" -eq 0 ] && [ "$have_mise" -eq 0 ]; then
+  warn "mise not found; skipping automatic tool installation"
+fi
+
+if [ "$check_only" -eq 0 ] && [ ! -f "$project_root/vendor/slack-export-viewer/setup.py" ]; then
+  if command -v git >/dev/null 2>&1; then
+    log "Initializing git submodules"
+    (cd "$project_root" && git submodule update --init --recursive)
+  fi
+fi
+
+missing_required=()
+path_notes=()
+warnings=()
+
+if command -v bash >/dev/null 2>&1; then
+  :
+else
+  missing_required+=("bash")
+fi
+
+if command -v git >/dev/null 2>&1; then
+  :
+else
+  missing_required+=("git")
+fi
+
+if command -v tar >/dev/null 2>&1; then
+  :
+else
+  missing_required+=("tar")
+fi
+
+python3_mode="missing"
+if command -v python3 >/dev/null 2>&1; then
+  python3_mode="path"
+elif have_mise_tool python; then
+  python3_mode="mise"
+  path_notes+=("python3 (installed by mise)")
+else
+  missing_required+=("python3")
+fi
+
+if [ "$python3_mode" = "path" ]; then
+  if ! python3 -c "import venv" >/dev/null 2>&1; then
+    missing_required+=("python3 venv module")
+  fi
+elif [ "$python3_mode" = "mise" ]; then
+  if ! (cd "$project_root" && mise exec -- python3 -c "import venv" >/dev/null 2>&1); then
+    missing_required+=("python3 venv module")
+  fi
+fi
+
+if command -v pandoc >/dev/null 2>&1; then
+  :
+elif have_mise_tool pandoc; then
+  path_notes+=("pandoc (installed by mise)")
+else
+  missing_required+=("pandoc")
+fi
+
+if command -v terraform >/dev/null 2>&1; then
+  :
+elif have_mise_tool terraform; then
+  path_notes+=("terraform (installed by mise)")
+else
+  missing_required+=("terraform")
+fi
+
+if ! command -v zip >/dev/null 2>&1; then
+  warnings+=("zip not found; bin/upload will create a .tar archive instead")
+fi
+
+have_upload_method=0
+if command -v curl >/dev/null 2>&1; then
+  have_upload_method=1
+fi
+if command -v aws >/dev/null 2>&1; then
+  have_upload_method=1
+elif have_mise_tool awscli; then
+  path_notes+=("aws (installed by mise)")
+  have_upload_method=1
+fi
+if [ "$have_upload_method" -eq 0 ]; then
+  warnings+=("No upload client found (install curl for presigned uploads, or aws CLI for direct R2 uploads)")
+fi
+
+if [ ! -f "$project_root/.env" ] && [ -f "$project_root/.env.example" ]; then
+  warnings+=(".env is missing; copy .env.example to .env and fill Cloudflare/R2 secrets")
+fi
+
+if [ "${#warnings[@]}" -gt 0 ]; then
+  for msg in "${warnings[@]}"; do
+    warn "$msg"
+  done
+fi
+
+if [ "${#path_notes[@]}" -gt 0 ]; then
+  printf 'Notice: these tools are installed via mise but may not be on your PATH yet:\n'
+  for note in "${path_notes[@]}"; do
+    printf '  - %s\n' "$note"
+  done
+  printf 'Run this once per shell session if needed:\n'
+  printf '  eval "$(mise activate bash)"\n'
+fi
+
+if [ "${#missing_required[@]}" -gt 0 ]; then
+  printf 'Missing required dependencies:\n' >&2
+  for dep in "${missing_required[@]}"; do
+    printf '  - %s\n' "$dep" >&2
+  done
+
+  if [ "$have_mise" -eq 0 ]; then
+    printf 'Install mise or install the missing dependencies manually.\n' >&2
+  elif [ ! -f "$project_root/mise.toml" ]; then
+    printf 'Add a mise.toml and run: mise install\n' >&2
+  else
+    printf 'Try re-running: bin/setup\n' >&2
+  fi
+
+  exit 1
+fi
+
+log "Setup complete"

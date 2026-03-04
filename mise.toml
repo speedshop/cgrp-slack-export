@@ -1,0 +1,5 @@
+[tools]
+python = "3.12"
+awscli = "2"
+pandoc = "3"
+terraform = "1.8"

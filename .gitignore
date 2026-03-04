@@ -1,8 +1,23 @@
 # Local build/runtime artifacts
 .venv-sev/
+dist/*
+!dist/.gitkeep
 viewer-site/
 *.pyc
 __pycache__/
+railsperf-export-latest.zip
+railsperf-export-latest.tar
+
+# Local secrets
+.env
+.env.local
+!.env.example
+
+# Terraform local state
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/crash.log
 
 # Slack export data (local only)
 archive/
