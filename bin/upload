@@ -27,12 +27,20 @@ Upload methods (in order):
   1) R2_PRESIGNED_PUT_URL + curl
   2) aws CLI direct upload to R2 (credentials from .env)
 
+In aws mode, bin/upload also writes an immutable timestamped backup under:
+  backups/YYYY/MM/DD/HHMMSSZ/<filename>
+
 Expected env vars for aws mode:
   R2_ACCOUNT_ID (or CLOUDFLARE_ACCOUNT_ID)
   R2_BUCKET (default: railsperf-exports)
   R2_OBJECT_KEY (default: railsperf-export-latest.zip)
+  R2_BACKUP_PREFIX (default: backups)
   R2_UPLOAD_ACCESS_KEY_ID (or AWS_ACCESS_KEY_ID)
   R2_UPLOAD_SECRET_ACCESS_KEY (or AWS_SECRET_ACCESS_KEY)
+
+Optional env vars for presigned mode:
+  R2_PRESIGNED_PUT_URL
+  R2_PRESIGNED_BACKUP_PUT_URL
 EOF
       exit 0
       ;;
@@ -61,6 +69,8 @@ fi
 
 bucket="${R2_BUCKET:-railsperf-exports}"
 object_key="${R2_OBJECT_KEY:-railsperf-export-latest.zip}"
+backup_prefix="${R2_BACKUP_PREFIX:-backups}"
+[ -n "$backup_prefix" ] || die "R2_BACKUP_PREFIX must not be empty"
 
 artifact_path=""
 if command -v zip >/dev/null 2>&1; then
@@ -83,12 +93,25 @@ else
   fi
 fi
 
+backup_timestamp="$(date -u +"%Y/%m/%d/%H%M%SZ")"
+object_filename="${object_key##*/}"
+backup_object_key="${backup_prefix%/}/${backup_timestamp}/${object_filename}"
+
 if [ -n "${R2_PRESIGNED_PUT_URL:-}" ]; then
   command -v curl >/dev/null 2>&1 || die "curl is required when using R2_PRESIGNED_PUT_URL"
 
-  log "Uploading with presigned URL"
+  log "Uploading latest artifact with presigned URL"
   curl --fail --silent --show-error -T "$artifact_path" "$R2_PRESIGNED_PUT_URL"
-  log "Upload complete"
+
+  if [ -n "${R2_PRESIGNED_BACKUP_PUT_URL:-}" ]; then
+    log "Uploading immutable backup with presigned URL"
+    curl --fail --silent --show-error -T "$artifact_path" "$R2_PRESIGNED_BACKUP_PUT_URL"
+    log "Uploads complete"
+  else
+    log "Latest upload complete"
+    log "Backup upload skipped in presigned mode; set R2_PRESIGNED_BACKUP_PUT_URL or use direct R2 credentials."
+  fi
+
   exit 0
 fi
 
@@ -104,14 +127,23 @@ aws_region="${AWS_REGION:-${AWS_DEFAULT_REGION:-auto}}"
 [ -n "$upload_access_key" ] || die "Missing R2_UPLOAD_ACCESS_KEY_ID (or AWS_ACCESS_KEY_ID)"
 [ -n "$upload_secret_key" ] || die "Missing R2_UPLOAD_SECRET_ACCESS_KEY (or AWS_SECRET_ACCESS_KEY)"
 
-log "Uploading to r2://$bucket/$object_key"
-AWS_ACCESS_KEY_ID="$upload_access_key" \
-AWS_SECRET_ACCESS_KEY="$upload_secret_key" \
-AWS_SESSION_TOKEN="$upload_session_token" \
-AWS_REGION="$aws_region" \
-AWS_DEFAULT_REGION="$aws_region" \
-AWS_EC2_METADATA_DISABLED=true \
-aws s3 cp "$artifact_path" "s3://$bucket/$object_key" \
-  --endpoint-url "https://${r2_account_id}.r2.cloudflarestorage.com"
+aws_r2_cp() {
+  local destination_key="$1"
 
-log "Upload complete"
+  log "Uploading to r2://$bucket/$destination_key"
+  AWS_ACCESS_KEY_ID="$upload_access_key" \
+  AWS_SECRET_ACCESS_KEY="$upload_secret_key" \
+  AWS_SESSION_TOKEN="$upload_session_token" \
+  AWS_REGION="$aws_region" \
+  AWS_DEFAULT_REGION="$aws_region" \
+  AWS_EC2_METADATA_DISABLED=true \
+  aws s3 cp "$artifact_path" "s3://$bucket/$destination_key" \
+    --endpoint-url "https://${r2_account_id}.r2.cloudflarestorage.com"
+}
+
+aws_r2_cp "$object_key"
+aws_r2_cp "$backup_object_key"
+
+log "Uploads complete"
+log "Latest: r2://$bucket/$object_key"
+log "Backup: r2://$bucket/$backup_object_key"

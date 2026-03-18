@@ -67,13 +67,21 @@ bin/upload
 
 ## Upload behavior
 
-`bin/upload` creates `railsperf-export-latest.zip` from `archive/` (falls back to `.tar` if `zip` is unavailable), then uploads via:
+`bin/upload` creates `railsperf-export-latest.zip` from `archive/` (falls back to `.tar` if `zip` is unavailable), then uploads:
 
-1. `R2_PRESIGNED_PUT_URL` + `curl`, or
+- the stable latest artifact to `R2_OBJECT_KEY` (default: `railsperf-export-latest.zip`)
+- an immutable timestamped backup under `R2_BACKUP_PREFIX` (default: `backups/YYYY/MM/DD/HHMMSSZ/...`)
+
+Upload methods:
+
+1. `R2_PRESIGNED_PUT_URL` + `curl`
+   - Set `R2_PRESIGNED_BACKUP_PUT_URL` too if you want immutable backups in presigned mode.
 2. AWS CLI to `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` using:
    - `R2_ACCOUNT_ID` (or `CLOUDFLARE_ACCOUNT_ID`)
    - `R2_UPLOAD_ACCESS_KEY_ID`
    - `R2_UPLOAD_SECRET_ACCESS_KEY`
+
+With direct R2 credentials, `bin/upload` always writes both the latest object and a timestamped backup.
 
 ## Merge behavior
 
