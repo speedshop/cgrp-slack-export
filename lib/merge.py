@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+
+import json
+import os
+import re
+import shutil
+import sys
+import tempfile
+import zipfile
+
+DATE_FILE = re.compile(r"^\d{4}-\d{2}-\d{2}\.json$")
+EXCLUDED_CHANNELS = {"random", "introductions"}
+
+
+def abort(message: str) -> None:
+    print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def canonical_json(value) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def read_json_array(path: str):
+    if not os.path.exists(path):
+        return []
+
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            parsed = json.load(handle)
+    except json.JSONDecodeError as exc:
+        abort(f"Invalid JSON in {path}: {exc}")
+
+    if isinstance(parsed, list):
+        return parsed
+
+    abort(f"Expected an array JSON file: {path}")
+
+
+def write_json(path: str, value) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as handle:
+        json.dump(value, handle, ensure_ascii=False, indent=2)
+        handle.write("\n")
+
+
+def export_root(path: str) -> bool:
+    return (
+        os.path.isfile(os.path.join(path, "users.json"))
+        and os.path.isfile(os.path.join(path, "channels.json"))
+    )
+
+
+def find_export_root(path: str) -> str:
+    if export_root(path):
+        return path
+
+    for root, _, files in os.walk(path):
+        if "users.json" in files and "channels.json" in files:
+            return root
+
+    abort(f"Could not find users.json + channels.json in export: {path}")
+
+
+def extract_zip(zip_path: str, destination: str) -> None:
+    root = os.path.abspath(destination)
+    prefix = root + os.sep
+
+    with zipfile.ZipFile(zip_path, "r") as archive:
+        for entry in archive.infolist():
+            target = os.path.abspath(os.path.join(root, entry.filename))
+            if target != root and not target.startswith(prefix):
+                continue
+
+            if entry.is_dir():
+                os.makedirs(target, exist_ok=True)
+                continue
+
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with archive.open(entry, "r") as source, open(target, "wb") as output:
+                shutil.copyfileobj(source, output)
+
+
+def load_source_root(input_path: str):
+    absolute_input = os.path.abspath(input_path)
+
+    if os.path.isdir(absolute_input):
+        return find_export_root(absolute_input), None
+
+    if not os.path.isfile(absolute_input) or not absolute_input.lower().endswith(".zip"):
+        abort(f"Input must be a Slack export ZIP or unzipped directory: {absolute_input}")
+
+    temp_dir = tempfile.mkdtemp(prefix="slack-export-")
+    extract_zip(absolute_input, temp_dir)
+    return find_export_root(temp_dir), temp_dir
+
+
+def excluded_channel(name: str) -> bool:
+    return name in EXCLUDED_CHANNELS
+
+
+def filter_excluded_channels(channels):
+    return [channel for channel in channels if channel.get("name") not in EXCLUDED_CHANNELS]
+
+
+def merge_by_id(existing, incoming):
+    merged_by_id = {}
+    no_id = []
+
+    for row in existing:
+        row_id = row.get("id")
+        if row_id is not None:
+            merged_by_id[row_id] = row
+        else:
+            no_id.append(row)
+
+    for row in incoming:
+        row_id = row.get("id")
+        if row_id is not None:
+            merged_by_id[row_id] = row
+        else:
+            no_id.append(row)
+
+    sorted_rows = [merged_by_id[key] for key in sorted(merged_by_id.keys(), key=lambda x: str(x))]
+
+    unique_no_id = []
+    seen = set()
+    for row in no_id:
+        key = canonical_json(row)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_no_id.append(row)
+
+    return sorted_rows + unique_no_id
+
+
+def ts_key(ts):
+    raw = "" if ts is None else str(ts)
+    if "." in raw:
+        seconds, fractional = raw.split(".", 1)
+    else:
+        seconds, fractional = raw, ""
+
+    try:
+        seconds_key = int(seconds)
+    except ValueError:
+        seconds_key = 0
+
+    return seconds_key, (fractional + "000000")[:6]
+
+
+def merge_messages(existing, incoming):
+    by_ts = {}
+    no_ts = []
+
+    for message in existing:
+        ts = message.get("ts")
+        if ts is not None:
+            by_ts[str(ts)] = message
+        else:
+            no_ts.append(message)
+
+    for message in incoming:
+        ts = message.get("ts")
+        if ts is not None:
+            by_ts[str(ts)] = message
+        else:
+            no_ts.append(message)
+
+    sorted_messages = sorted(by_ts.values(), key=lambda message: ts_key(message.get("ts")))
+
+    unique_no_ts = {}
+    for message in no_ts:
+        unique_no_ts[canonical_json(message)] = message
+
+    sorted_no_ts = [unique_no_ts[key] for key in sorted(unique_no_ts.keys())]
+    return sorted_messages + sorted_no_ts
+
+
+def purge_excluded_channels(archive_path: str) -> None:
+    for channel in sorted(EXCLUDED_CHANNELS):
+        path = os.path.join(archive_path, channel)
+        if os.path.isdir(path):
+            shutil.rmtree(path)
+            print(f"Removed excluded channel directory: {channel}")
+
+    channels_file = os.path.join(archive_path, "channels.json")
+    if not os.path.isfile(channels_file):
+        return
+
+    channels = read_json_array(channels_file)
+    filtered = filter_excluded_channels(channels)
+    if len(filtered) != len(channels):
+        write_json(channels_file, filtered)
+        print("Removed excluded channels from channels.json")
+
+
+def merge_index_file(source_root: str, archive_path: str, file_name: str) -> None:
+    source = os.path.join(source_root, file_name)
+    if not os.path.isfile(source):
+        return
+
+    target = os.path.join(archive_path, file_name)
+    existing = read_json_array(target)
+    incoming = read_json_array(source)
+
+    if file_name == "channels.json":
+        existing = filter_excluded_channels(existing)
+        incoming = filter_excluded_channels(incoming)
+
+    merged = merge_by_id(existing, incoming)
+    write_json(target, merged)
+
+    print(f"Merged {file_name}: {len(existing)} -> {len(merged)}")
+
+
+def merge_daily_file(channel: str, source_dir: str, target_dir: str, file_name: str) -> None:
+    source_file = os.path.join(source_dir, file_name)
+    target_file = os.path.join(target_dir, file_name)
+
+    existing = read_json_array(target_file)
+    incoming = read_json_array(source_file)
+    merged = merge_messages(existing, incoming)
+
+    write_json(target_file, merged)
+    print(f"  {channel}/{file_name}: {len(existing)} + {len(incoming)} => {len(merged)}")
+
+
+def merge_channel_messages(source_root: str, archive_path: str) -> None:
+    channels = []
+    for entry in os.listdir(source_root):
+        entry_path = os.path.join(source_root, entry)
+        if os.path.isdir(entry_path) and not excluded_channel(entry):
+            channels.append(entry)
+
+    for channel in sorted(channels):
+        source_dir = os.path.join(source_root, channel)
+        daily_files = [
+            entry for entry in sorted(os.listdir(source_dir))
+            if DATE_FILE.match(entry)
+        ]
+
+        if not daily_files:
+            continue
+
+        target_dir = os.path.join(archive_path, channel)
+        os.makedirs(target_dir, exist_ok=True)
+
+        print(f"Channel {channel}: {len(daily_files)} files")
+        for file_name in daily_files:
+            merge_daily_file(channel, source_dir, target_dir, file_name)
+
+
+def usage() -> str:
+    return (
+        "Usage: mise run merge -- <slack-export.zip|directory> [archive-path]\n\n"
+        "Merges a Slack export into the archive directory."
+    )
+
+
+def main(argv):
+    if argv and argv[0] in {"-h", "--help"}:
+        print(usage())
+        return 0
+
+    if len(argv) < 1 or len(argv) > 2:
+        print(usage(), file=sys.stderr)
+        return 1
+
+    input_path = argv[0]
+    archive_path = os.path.abspath(argv[1] if len(argv) == 2 else os.path.join(os.path.dirname(script_dir()), "archive"))
+
+    source_root = None
+    temp_dir = None
+
+    try:
+        source_root, temp_dir = load_source_root(input_path)
+        os.makedirs(archive_path, exist_ok=True)
+        purge_excluded_channels(archive_path)
+
+        merge_index_file(source_root, archive_path, "users.json")
+        merge_index_file(source_root, archive_path, "channels.json")
+        merge_channel_messages(source_root, archive_path)
+
+        print(f"✅ Merge complete: {archive_path}")
+        return 0
+    finally:
+        if temp_dir and os.path.isdir(temp_dir):
+            shutil.rmtree(temp_dir)
+
+
+def script_dir() -> str:
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

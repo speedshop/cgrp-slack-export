@@ -9,6 +9,6 @@ output "r2_s3_endpoint" {
 }
 
 output "r2_object_key" {
-  description = "Default key to upload from bin/upload."
+  description = "Default key to upload from mise run upload."
   value       = var.r2_object_key
 }

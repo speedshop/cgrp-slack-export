@@ -7,20 +7,17 @@ Local tooling to maintain a merged Slack export archive, build browsable outputs
 - `archive/` — merged Slack export data (living archive)
 - `imports/` — raw export ZIPs
 - `dist/` — generated viewer + markdown outputs
-- `bin/merge` — merge a Slack export ZIP/dir into `archive/`
-- `bin/build` — build `dist/index.html`, `dist/archive-single.html`, `dist/archive.md`
-- `bin/upload` — package `archive/` and upload to R2
-- `bin/publish` — run merge → build → upload in one command
-- `bin/tf` — run Terraform in `terraform/` with `.env` loaded
+- `lib/` — task implementations called by `mise`
+- `mise.toml` — tool versions + task entrypoints
 - `terraform/` — Cloudflare R2 bucket IaC
 
 ## 1) Setup tools
 
 ```bash
-bin/setup
+mise run setup
 ```
 
-`bin/setup` checks/installs tools from `mise.toml` (Python, AWS CLI, Pandoc, Terraform), initializes submodules, and checks dependencies.
+`mise run setup` checks/installs tools from `mise.toml` (Python, AWS CLI, Pandoc, Terraform), initializes submodules, and checks dependencies.
 
 ## 2) Configure secrets with `.env`
 
@@ -34,17 +31,17 @@ Fill in real values for:
 - R2 upload keypair (Read & Write token)
 - bucket/object names (defaults already set)
 
-`bin/upload` and `bin/tf` automatically load `.env`.
+`mise run upload` and `mise run tf` automatically load `.env`.
 
 ## 3) Create/manage the R2 bucket with Terraform
 
 ```bash
-bin/tf init
-bin/tf plan
-bin/tf apply
+mise run tf -- init
+mise run tf -- plan
+mise run tf -- apply
 ```
 
-`bin/tf` auto-loads `.env` and runs Terraform in `terraform/`.
+`mise run tf` auto-loads `.env` and runs Terraform in `terraform/`.
 This manages the `railsperf-exports` R2 bucket (or your configured name).
 
 ## 4) Monthly workflow
@@ -52,22 +49,22 @@ This manages the `railsperf-exports` R2 bucket (or your configured name).
 ### One-shot publish (recommended)
 
 ```bash
-bin/publish imports/monthly-2026-05.zip
+mise run publish -- imports/monthly-2026-05.zip
 ```
 
-Use `bin/publish --skip-merge` when `archive/` is already up to date and you only want build+upload.
+Use `mise run publish -- --skip-merge` when `archive/` is already up to date and you only want build + upload.
 
 ### Or run steps manually
 
 ```bash
-bin/merge imports/monthly-2026-05.zip
-bin/build
-bin/upload
+mise run merge -- imports/monthly-2026-05.zip
+mise run build
+mise run upload
 ```
 
 ## Upload behavior
 
-`bin/upload` creates `railsperf-export-latest.zip` from `archive/` (falls back to `.tar` if `zip` is unavailable), then uploads via:
+`mise run upload` creates `railsperf-export-latest.zip` from `archive/` (falls back to `.tar` if `zip` is unavailable), then uploads via:
 
 1. `R2_PRESIGNED_PUT_URL` + `curl`, or
 2. AWS CLI to `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` using:
@@ -82,3 +79,7 @@ bin/upload
 - per-day channel files merged by message `ts`
 - excluded channels: `#random`, `#introductions`
 - idempotent when re-merging same export
+
+## Compatibility shims
+
+The old `bin/*` commands still exist as tiny wrappers around the corresponding `mise` tasks.

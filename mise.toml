@@ -1,5 +1,47 @@
+env_file = ".env"
+
 [tools]
 python = "3.12"
 awscli = "2"
 pandoc = "3"
 terraform = "1.8"
+
+[tasks.build]
+description = "Build dist outputs from archive/"
+dir = "{{config_root}}"
+run = "./lib/build.sh \"$@\""
+
+[tasks.clean]
+description = "Clean generated artifacts"
+dir = "{{config_root}}"
+run = "./lib/clean.sh \"$@\""
+
+[tasks.merge]
+description = "Merge a Slack export into archive/"
+dir = "{{config_root}}"
+run = "./lib/merge.py \"$@\""
+
+[tasks.publish]
+description = "Run merge, build, and upload"
+dir = "{{config_root}}"
+run = "./lib/publish.sh \"$@\""
+
+[tasks.serve]
+description = "Build if needed and open dist/index.html"
+dir = "{{config_root}}"
+run = "./lib/serve.sh \"$@\""
+
+[tasks.setup]
+description = "Install/check tools and initialize submodules"
+dir = "{{config_root}}"
+run = "./lib/setup.sh \"$@\""
+
+[tasks.tf]
+description = "Run terraform/ with .env loaded"
+dir = "{{config_root}}"
+run = "./lib/tf.sh \"$@\""
+
+[tasks.upload]
+description = "Package archive/ and upload to R2"
+dir = "{{config_root}}"
+run = "./lib/upload.sh \"$@\""

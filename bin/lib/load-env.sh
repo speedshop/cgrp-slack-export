@@ -1,14 +1,7 @@
 #!/usr/bin/env bash
 
-load_env_file() {
-  local env_file="$1"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+project_root="$(cd "$script_dir/../.." && pwd)"
 
-  if [ ! -f "$env_file" ]; then
-    return 0
-  fi
-
-  set -a
-  # shellcheck disable=SC1090
-  source "$env_file"
-  set +a
-}
+# shellcheck disable=SC1091
+source "$project_root/lib/load-env.sh"

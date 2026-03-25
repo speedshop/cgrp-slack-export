@@ -16,12 +16,12 @@ Set these in `.env` (see `.env.example`):
 Run from repo root:
 
 ```bash
-bin/tf init
-bin/tf plan
-bin/tf apply
+mise run tf -- init
+mise run tf -- plan
+mise run tf -- apply
 ```
 
 After apply, go create the R2 API tokens in Cloudflare dashboard:
 
-1. upload token (`Object Read & Write`) for `bin/upload`
+1. upload token (`Object Read & Write`) for `mise run upload`
 2. presign token (`Object Read`) for the bot
