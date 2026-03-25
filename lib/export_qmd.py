@@ -11,7 +11,6 @@ from datetime import datetime
 from pathlib import Path
 
 DATE_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.json$")
-SKIP_SUBTYPES = {"channel_join", "channel_leave", "message_deleted", "tombstone"}
 USER_LINK = re.compile(r"<@([A-Z0-9]+)(?:\|([^>]+))?>")
 CHANNEL_LINK = re.compile(r"<#([A-Z0-9]+)\|([^>]+)>")
 SPECIAL_LINK = re.compile(r"<!([^>]+)>")
@@ -110,21 +109,7 @@ def ts_to_datetime(ts):
 
 
 def include_message(message):
-    if message.get("hidden"):
-        return False
-
-    if message.get("subtype") in SKIP_SUBTYPES:
-        return False
-
-    if message.get("subtype") == "thread_broadcast":
-        return True
-
-    return bool(
-        message.get("text")
-        or message.get("attachments")
-        or message.get("files")
-        or message.get("reactions")
-    )
+    return not message.get("hidden")
 
 
 def render_attachments(message, users, channels):

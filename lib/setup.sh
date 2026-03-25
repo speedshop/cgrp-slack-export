@@ -106,14 +106,6 @@ elif [ "$python3_mode" = "mise" ]; then
   fi
 fi
 
-if command -v terraform >/dev/null 2>&1; then
-  :
-elif have_mise_tool terraform; then
-  path_notes+=("terraform (installed by mise)")
-else
-  missing_required+=("terraform")
-fi
-
 if ! command -v zip >/dev/null 2>&1; then
   warnings+=("zip not found; mise run upload will create a .tar archive instead")
 fi
@@ -133,7 +125,7 @@ if [ "$have_upload_method" -eq 0 ]; then
 fi
 
 if [ ! -f "$project_root/.env" ] && [ -f "$project_root/.env.example" ]; then
-  warnings+=(".env is missing; copy .env.example to .env and fill Cloudflare/R2 secrets")
+  warnings+=(".env is missing; copy .env.example to .env and fill R2 upload settings")
 fi
 
 if [ "${#warnings[@]}" -gt 0 ]; then

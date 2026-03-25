@@ -4,8 +4,17 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "$script_dir/.." && pwd)"
 archive_dir="$project_root/archive"
+dist_dir="$project_root/dist"
+site_index="$dist_dir/index.html"
+single_html_export="$dist_dir/archive-single.html"
+markdown_index="$dist_dir/archive.md"
+markdown_dir="$dist_dir/markdown"
+readme_path="$dist_dir/README.md"
+license_path="$dist_dir/LICENSE"
 zip_path="$project_root/railsperf-export-latest.zip"
 tar_path="$project_root/railsperf-export-latest.tar"
+staging_dir=""
+bundle_root="railsperf-export-latest"
 
 # shellcheck disable=SC1091
 source "$project_root/lib/load-env.sh"
@@ -21,7 +30,7 @@ for arg in "$@"; do
       cat <<'EOF'
 Usage: mise run upload -- [--build]
 
-Creates railsperf-export-latest.zip (or .tar fallback) from archive/ and uploads it.
+Creates railsperf-export-latest.zip (or .tar fallback) from dist/ and uploads it.
 
 Upload methods (in order):
   1) R2_PRESIGNED_PUT_URL + curl
@@ -52,30 +61,54 @@ die() {
   exit 1
 }
 
+cleanup() {
+  if [ -n "$staging_dir" ] && [ -d "$staging_dir" ]; then
+    rm -rf "$staging_dir"
+  fi
+}
+trap cleanup EXIT
+
 if [ "$run_build" -eq 1 ]; then
   log "Running mise run build"
   "$project_root/lib/build.sh"
 fi
 
 [ -d "$archive_dir" ] || die "archive/ not found. Merge an export first."
+[ -d "$dist_dir" ] || die "dist/ not found. Run mise run build or mise run upload -- --build first."
+[ -f "$site_index" ] || die "Missing dist output: $site_index"
+[ -f "$single_html_export" ] || die "Missing dist output: $single_html_export"
+[ -s "$markdown_index" ] || die "Missing dist output: $markdown_index"
+[ -d "$markdown_dir" ] || die "Missing dist output: $markdown_dir"
+[ -s "$readme_path" ] || die "Missing dist output: $readme_path"
+[ -s "$license_path" ] || die "Missing dist output: $license_path"
 
 bucket="${R2_BUCKET:-railsperf-exports}"
 object_key="${R2_OBJECT_KEY:-railsperf-export-latest.zip}"
 
+staging_dir="${TMPDIR:-/tmp}/slack-export-upload.$$"
+rm -rf "$staging_dir"
+mkdir -p "$staging_dir/$bundle_root"
+cp -R "$dist_dir"/. "$staging_dir/$bundle_root"/
+find "$staging_dir/$bundle_root" \( -name '.DS_Store' -o -name '._*' \) -delete
+
 artifact_path=""
-if command -v zip >/dev/null 2>&1; then
+if command -v ditto >/dev/null 2>&1; then
   artifact_path="$zip_path"
-  log "Creating ZIP from archive/"
+  log "Creating ZIP from dist/ with ditto"
+  ditto -c -k --norsrc --keepParent "$staging_dir/$bundle_root" "$artifact_path"
+elif command -v zip >/dev/null 2>&1; then
+  artifact_path="$zip_path"
+  log "Creating ZIP from dist/"
   (
-    cd "$archive_dir"
-    zip -rq "$artifact_path" .
+    cd "$staging_dir"
+    zip -rq "$artifact_path" "$bundle_root"
   )
 else
   artifact_path="$tar_path"
-  log "zip not found; creating TAR from archive/"
+  log "zip not found; creating TAR from dist/"
   (
-    cd "$archive_dir"
-    tar -cf "$artifact_path" .
+    cd "$staging_dir"
+    tar -cf "$artifact_path" "$bundle_root"
   )
 
   if [ -z "${R2_OBJECT_KEY:-}" ]; then

@@ -9,7 +9,6 @@ Local tooling to maintain a merged Slack export archive, build browsable outputs
 - `dist/` — generated viewer + markdown outputs for qmd-style indexing
 - `lib/` — task implementations called by `mise`
 - `mise.toml` — tool versions + task entrypoints
-- `terraform/` — Cloudflare R2 bucket IaC
 
 ## 1) Setup tools
 
@@ -17,7 +16,7 @@ Local tooling to maintain a merged Slack export archive, build browsable outputs
 mise run setup
 ```
 
-`mise run setup` checks/installs tools from `mise.toml` (Python, AWS CLI, Terraform), initializes submodules, and checks dependencies.
+`mise run setup` checks/installs tools from `mise.toml` (Python, AWS CLI), initializes submodules, and checks dependencies.
 
 ## 2) Configure secrets with `.env`
 
@@ -27,24 +26,13 @@ cp .env.example .env
 
 Fill in real values for:
 
-- Cloudflare account + API token (Terraform)
+- R2 account + upload endpoint settings
 - R2 upload keypair (Read & Write token)
 - bucket/object names (defaults already set)
 
-`mise run upload` and `mise run tf` automatically load `.env`.
+`mise run upload` automatically loads `.env`.
 
-## 3) Create/manage the R2 bucket with Terraform
-
-```bash
-mise run tf -- init
-mise run tf -- plan
-mise run tf -- apply
-```
-
-`mise run tf` auto-loads `.env` and runs Terraform in `terraform/`.
-This manages the `railsperf-exports` R2 bucket (or your configured name).
-
-## 4) Monthly workflow
+## 3) Monthly workflow
 
 ### One-shot publish (recommended)
 
@@ -73,11 +61,11 @@ These files are structured for local indexing tools like qmd: real headings, sma
 
 ## Upload behavior
 
-`mise run upload` creates `railsperf-export-latest.zip` from `archive/` (falls back to `.tar` if `zip` is unavailable), then uploads via:
+`mise run upload` creates `railsperf-export-latest.zip` from `dist/` (falls back to `.tar` if `zip` is unavailable), then uploads via:
 
 1. `R2_PRESIGNED_PUT_URL` + `curl`, or
 2. AWS CLI to `https://<ACCOUNT_ID>.r2.cloudflarestorage.com` using:
-   - `R2_ACCOUNT_ID` (or `CLOUDFLARE_ACCOUNT_ID`)
+   - `R2_ACCOUNT_ID`
    - `R2_UPLOAD_ACCESS_KEY_ID`
    - `R2_UPLOAD_SECRET_ACCESS_KEY`
 

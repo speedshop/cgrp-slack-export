@@ -24,7 +24,7 @@ Usage:
 
 Runs the full monthly pipeline:
   1) merge (unless --skip-merge)
-  2) build
+  2) build (if needed)
   3) upload
 EOF
 }
@@ -76,7 +76,7 @@ else
   log "Step 1/3: merge (skipped)"
 fi
 
-log "Step 2/3: build"
+log "Step 2/3: build (if needed)"
 "$build_script"
 
 log "Step 3/3: upload"
