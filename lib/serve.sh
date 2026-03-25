@@ -6,7 +6,8 @@ project_root="$(cd "$script_dir/.." && pwd)"
 build_script="$project_root/lib/build.sh"
 dist_dir="$project_root/dist"
 output_index="$dist_dir/index.html"
-markdown_export="$dist_dir/archive.md"
+markdown_index="$dist_dir/archive.md"
+qmd_dir="$dist_dir/qmd"
 
 open_browser=1
 for arg in "$@"; do
@@ -18,7 +19,7 @@ for arg in "$@"; do
       cat <<'EOF'
 Usage: mise run serve -- [--no-open]
 
-If dist/index.html or dist/archive.md are missing, runs mise run build.
+If dist/index.html, dist/archive.md, or dist/qmd/ are missing, runs mise run build.
 Then opens dist/index.html when possible.
 EOF
       exit 0
@@ -35,7 +36,7 @@ if [ ! -x "$build_script" ]; then
   exit 1
 fi
 
-if [ ! -f "$output_index" ] || [ ! -s "$markdown_export" ]; then
+if [ ! -f "$output_index" ] || [ ! -s "$markdown_index" ] || [ ! -d "$qmd_dir" ]; then
   "$build_script"
 else
   printf 'dist outputs already exist; skipping build\n'

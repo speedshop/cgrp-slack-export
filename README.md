@@ -6,7 +6,7 @@ Local tooling to maintain a merged Slack export archive, build browsable outputs
 
 - `archive/` — merged Slack export data (living archive)
 - `imports/` — raw export ZIPs
-- `dist/` — generated viewer + markdown outputs
+- `dist/` — generated viewer + qmd-oriented markdown outputs
 - `lib/` — task implementations called by `mise`
 - `mise.toml` — tool versions + task entrypoints
 - `terraform/` — Cloudflare R2 bucket IaC
@@ -17,7 +17,7 @@ Local tooling to maintain a merged Slack export archive, build browsable outputs
 mise run setup
 ```
 
-`mise run setup` checks/installs tools from `mise.toml` (Python, AWS CLI, Pandoc, Terraform), initializes submodules, and checks dependencies.
+`mise run setup` checks/installs tools from `mise.toml` (Python, AWS CLI, Terraform), initializes submodules, and checks dependencies.
 
 ## 2) Configure secrets with `.env`
 
@@ -61,6 +61,15 @@ mise run merge -- imports/monthly-2026-05.zip
 mise run build
 mise run upload
 ```
+
+## qmd-oriented Markdown export
+
+`mise run build` now writes a qmd-friendly markdown corpus into:
+
+- `dist/archive.md` — top-level index file
+- `dist/qmd/<channel>/<YYYY-MM>.md` — monthly channel documents
+
+These files are structured for local indexing tools like qmd: real headings, smaller documents, and newest-first message ordering.
 
 ## Upload behavior
 

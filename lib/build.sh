@@ -7,9 +7,8 @@ archive_dir="$project_root/archive"
 dist_dir="$project_root/dist"
 site_index="$dist_dir/index.html"
 single_html_export="$dist_dir/archive-single.html"
-markdown_export="$dist_dir/archive.md"
-markdown_export_tmp="$dist_dir/.archive.md.tmp"
-sanitized_html_tmp="$dist_dir/.archive-single.sanitized.html"
+markdown_index="$dist_dir/archive.md"
+qmd_dir="$dist_dir/qmd"
 viewer_venv="$project_root/.venv-sev"
 viewer_submodule="$project_root/vendor/slack-export-viewer"
 local_viewer="$viewer_venv/bin/slack-export-viewer"
@@ -29,12 +28,6 @@ cleanup() {
   if [ -n "$tmp_export_dir" ] && [ -d "$tmp_export_dir" ]; then
     rm -rf "$tmp_export_dir"
   fi
-  if [ -f "$markdown_export_tmp" ]; then
-    rm -f "$markdown_export_tmp"
-  fi
-  if [ -f "$sanitized_html_tmp" ]; then
-    rm -f "$sanitized_html_tmp"
-  fi
 }
 trap cleanup EXIT
 
@@ -45,7 +38,7 @@ Usage: mise run build
 Builds outputs into dist/:
 - static viewer site (index.html + assets)
 - single-file HTML export (archive-single.html)
-- Markdown export (archive.md)
+- qmd-oriented Markdown corpus (archive.md + qmd/**/*.md)
 EOF
   exit 0
 fi
@@ -94,17 +87,6 @@ fi
 [ -x "$viewer_python" ] || die "Could not determine slack-export-viewer python interpreter"
 [ -f "$viewer_wrapper" ] || die "Missing viewer wrapper: $viewer_wrapper"
 
-pandoc_mode="missing"
-pandoc_cmd=""
-if command -v pandoc >/dev/null 2>&1; then
-  pandoc_mode="path"
-  pandoc_cmd="$(command -v pandoc)"
-elif command -v mise >/dev/null 2>&1 && (cd "$project_root" && mise where pandoc >/dev/null 2>&1); then
-  pandoc_mode="mise"
-else
-  die "pandoc is required to generate dist/archive.md (run: mise run setup)"
-fi
-
 log "Building static viewer site"
 log "Output: $dist_dir"
 "$viewer_python" "$viewer_wrapper" viewer -z "$archive_dir" --html-only -o "$dist_dir" --no-browser
@@ -123,30 +105,16 @@ generated_html="$(find "$tmp_export_dir" -maxdepth 1 -type f -name '*.html' | he
 [ -n "$generated_html" ] || die "Could not locate single-file HTML export"
 cp "$generated_html" "$single_html_export"
 
-log "Sanitizing single-file export for Markdown conversion"
-if command -v tidy >/dev/null 2>&1; then
-  tidy -quiet -utf8 -asxhtml -numeric --show-warnings no --force-output yes \
-    -o "$sanitized_html_tmp" "$single_html_export" >/dev/null 2>&1 || true
-else
-  cp "$single_html_export" "$sanitized_html_tmp"
-fi
+log "Generating qmd-oriented Markdown corpus"
+rm -f "$markdown_index"
+rm -rf "$qmd_dir"
+"$viewer_python" "$project_root/lib/export_qmd.py" "$archive_dir" "$dist_dir"
 
-[ -s "$sanitized_html_tmp" ] || cp "$single_html_export" "$sanitized_html_tmp"
-
-log "Converting single-file export to Markdown"
-if [ "$pandoc_mode" = "path" ]; then
-  "$pandoc_cmd" "$sanitized_html_tmp" --from=html --to=gfm --output="$markdown_export_tmp"
-else
-  (
-    cd "$project_root"
-    mise exec -- pandoc "$sanitized_html_tmp" --from=html --to=gfm --output="$markdown_export_tmp"
-  )
-fi
-
-[ -s "$markdown_export_tmp" ] || die "Markdown export failed: empty output"
-mv "$markdown_export_tmp" "$markdown_export"
+[ -s "$markdown_index" ] || die "Markdown index export failed: $markdown_index"
+[ -d "$qmd_dir" ] || die "qmd export directory missing: $qmd_dir"
 touch "$dist_dir/.gitkeep"
 
 log "Build complete"
 log "Site: $site_index"
-log "Markdown: $markdown_export"
+log "Markdown index: $markdown_index"
+log "qmd corpus: $qmd_dir"

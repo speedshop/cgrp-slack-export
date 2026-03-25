@@ -106,14 +106,6 @@ elif [ "$python3_mode" = "mise" ]; then
   fi
 fi
 
-if command -v pandoc >/dev/null 2>&1; then
-  :
-elif have_mise_tool pandoc; then
-  path_notes+=("pandoc (installed by mise)")
-else
-  missing_required+=("pandoc")
-fi
-
 if command -v terraform >/dev/null 2>&1; then
   :
 elif have_mise_tool terraform; then
