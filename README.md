@@ -77,6 +77,3 @@ These files are structured for local indexing tools like qmd: real headings, sma
 - excluded channels: `#random`, `#introductions`
 - idempotent when re-merging same export
 
-## Compatibility shims
-
-The old `bin/*` commands still exist as tiny wrappers around the corresponding `mise` tasks.
