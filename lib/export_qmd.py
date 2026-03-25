@@ -246,7 +246,7 @@ def write_index(index_path: Path, exports):
         "# Slack export markdown corpus",
         "",
         "This markdown export is optimized for qmd.",
-        "Index the `qmd/` directory as your collection root.",
+        "Index the `markdown/` directory as your collection root.",
         "",
     ]
 
@@ -274,11 +274,11 @@ def main(argv):
 
     archive_dir = Path(argv[0]).resolve()
     dist_dir = Path(argv[1]).resolve()
-    qmd_dir = dist_dir / "qmd"
+    markdown_dir = dist_dir / "markdown"
 
-    if qmd_dir.exists():
-        shutil.rmtree(qmd_dir)
-    qmd_dir.mkdir(parents=True, exist_ok=True)
+    if markdown_dir.exists():
+        shutil.rmtree(markdown_dir)
+    markdown_dir.mkdir(parents=True, exist_ok=True)
 
     users = load_users(archive_dir)
     channels = load_channels(archive_dir)
@@ -300,7 +300,7 @@ def main(argv):
                     month_messages[month].append(message)
 
         for month, messages in sorted(month_messages.items(), reverse=True):
-            export_path = qmd_dir / channel_dir.name / f"{month}.md"
+            export_path = markdown_dir / channel_dir.name / f"{month}.md"
             exports.append(export_month(channel_dir.name, month, messages, export_path, users, channels))
 
     write_index(dist_dir / "archive.md", exports)

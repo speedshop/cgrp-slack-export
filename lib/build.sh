@@ -8,7 +8,8 @@ dist_dir="$project_root/dist"
 site_index="$dist_dir/index.html"
 single_html_export="$dist_dir/archive-single.html"
 markdown_index="$dist_dir/archive.md"
-qmd_dir="$dist_dir/qmd"
+markdown_dir="$dist_dir/markdown"
+legacy_qmd_dir="$dist_dir/qmd"
 readme_dist_source="$project_root/README-DIST.md"
 readme_dist_target="$dist_dir/README.md"
 viewer_venv="$project_root/.venv-sev"
@@ -40,7 +41,7 @@ Usage: mise run build
 Builds outputs into dist/:
 - static viewer site (index.html + assets)
 - single-file HTML export (archive-single.html)
-- qmd-oriented Markdown corpus (archive.md + qmd/**/*.md)
+- qmd-oriented Markdown corpus (archive.md + markdown/**/*.md)
 - distribution readme (README.md, copied from README-DIST.md)
 EOF
   exit 0
@@ -114,11 +115,12 @@ log "Slimming generated HTML"
 
 log "Generating qmd-oriented Markdown corpus"
 rm -f "$markdown_index"
-rm -rf "$qmd_dir"
+rm -rf "$markdown_dir"
+rm -rf "$legacy_qmd_dir"
 "$viewer_python" "$project_root/lib/export_qmd.py" "$archive_dir" "$dist_dir"
 
 [ -s "$markdown_index" ] || die "Markdown index export failed: $markdown_index"
-[ -d "$qmd_dir" ] || die "qmd export directory missing: $qmd_dir"
+[ -d "$markdown_dir" ] || die "markdown export directory missing: $markdown_dir"
 
 log "Copying distribution readme"
 cp "$readme_dist_source" "$readme_dist_target"
@@ -129,4 +131,4 @@ touch "$dist_dir/.gitkeep"
 log "Build complete"
 log "Site: $site_index"
 log "Markdown index: $markdown_index"
-log "qmd corpus: $qmd_dir"
+log "markdown corpus: $markdown_dir"

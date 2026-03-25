@@ -25,24 +25,24 @@ If one file looks easier to share or inspect, use `./archive-single.html`. For n
 For text search, start with the markdown export, not the HTML.
 
 - `./archive.md` is the top-level index.
-- `./qmd/` contains the searchable corpus.
-- Files are split by channel and month: `./qmd/<channel>/<YYYY-MM>.md`.
+- `./markdown/` contains the searchable corpus.
+- Files are split by channel and month: `./markdown/<channel>/<YYYY-MM>.md`.
 
 Useful CLI examples:
 
 ```bash
-rg "incident review" ./qmd
-rg -n "postgres|redis" ./qmd
-rg -l "feature flag" ./qmd
+rg "incident review" ./markdown
+rg -n "postgres|redis" ./markdown
+rg -l "feature flag" ./markdown
 ```
 
 If you need a broad file listing first:
 
 ```bash
-find ./qmd -type f | sort
+find ./markdown -type f | sort
 ```
 
-You can also point a coding agent or local assistant at this directory and ask it to search or summarize the export. In practice, the best root is `./qmd/`, with `./archive.md` as the map of what is available.
+You can also point a coding agent or local assistant at this directory and ask it to search or summarize the export. In practice, the best root is `./markdown/`, with `./archive.md` as the map of what is available.
 
 Use the HTML files when you need to read a thread in a browser. Use the markdown files when you want fast grep-style search, indexing, chunking, or agent workflows.
 
@@ -50,7 +50,7 @@ Use the HTML files when you need to read a thread in a browser. Use the markdown
 
 This export is already shaped for QMD.
 
-- Use `./qmd/` as the collection root.
+- Use `./markdown/` as the collection root.
 - Use `./archive.md` as the human-readable index into the collection.
 - Do not point QMD at the HTML files unless you specifically want raw HTML indexing.
 
@@ -63,7 +63,7 @@ The markdown corpus is organized to work well with local indexing tools:
 
 A simple workflow is:
 
-1. Index `./qmd/` in QMD.
+1. Index `./markdown/` in QMD.
 2. Open `./archive.md` to see which channel/month files exist.
 3. Search in QMD, then jump to the matching markdown file for context.
 4. If needed, open `./index.html` to browse the same material in the viewer.

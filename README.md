@@ -6,7 +6,7 @@ Local tooling to maintain a merged Slack export archive, build browsable outputs
 
 - `archive/` — merged Slack export data (living archive)
 - `imports/` — raw export ZIPs
-- `dist/` — generated viewer + qmd-oriented markdown outputs
+- `dist/` — generated viewer + markdown outputs for qmd-style indexing
 - `lib/` — task implementations called by `mise`
 - `mise.toml` — tool versions + task entrypoints
 - `terraform/` — Cloudflare R2 bucket IaC
@@ -62,12 +62,12 @@ mise run build
 mise run upload
 ```
 
-## qmd-oriented Markdown export
+## Markdown export for qmd
 
 `mise run build` now writes a qmd-friendly markdown corpus into:
 
 - `dist/archive.md` — top-level index file
-- `dist/qmd/<channel>/<YYYY-MM>.md` — monthly channel documents
+- `dist/markdown/<channel>/<YYYY-MM>.md` — monthly channel documents
 
 These files are structured for local indexing tools like qmd: real headings, smaller documents, and newest-first message ordering.
 
