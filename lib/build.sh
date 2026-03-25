@@ -54,11 +54,16 @@ touch "$dist_dir/.gitkeep"
 
 viewer_cmd=""
 viewer_cli_cmd=""
+viewer_python=""
+viewer_wrapper="$project_root/lib/slack_export_viewer_desc.py"
 
 if [ -x "$local_viewer" ]; then
   viewer_cmd="$local_viewer"
+  viewer_python="$viewer_venv/bin/python"
 elif command -v slack-export-viewer >/dev/null 2>&1; then
   viewer_cmd="$(command -v slack-export-viewer)"
+  IFS= read -r viewer_python_shebang < "$viewer_cmd"
+  viewer_python="${viewer_python_shebang#\#!}"
 fi
 
 if [ -x "$local_viewer_cli" ]; then
@@ -77,10 +82,13 @@ if [ -z "$viewer_cmd" ] || [ -z "$viewer_cli_cmd" ]; then
 
   viewer_cmd="$local_viewer"
   viewer_cli_cmd="$local_viewer_cli"
+  viewer_python="$viewer_venv/bin/python"
 fi
 
 [ -x "$viewer_cmd" ] || die "slack-export-viewer not found"
 [ -x "$viewer_cli_cmd" ] || die "slack-export-viewer-cli not found"
+[ -x "$viewer_python" ] || die "Could not determine slack-export-viewer python interpreter"
+[ -f "$viewer_wrapper" ] || die "Missing viewer wrapper: $viewer_wrapper"
 
 pandoc_mode="missing"
 pandoc_cmd=""
@@ -95,7 +103,7 @@ fi
 
 log "Building static viewer site"
 log "Output: $dist_dir"
-"$viewer_cmd" -z "$archive_dir" --html-only -o "$dist_dir" --no-browser
+"$viewer_python" "$viewer_wrapper" viewer -z "$archive_dir" --html-only -o "$dist_dir" --no-browser
 [ -f "$site_index" ] || die "Build failed: $site_index not found"
 
 log "Generating single-file export"
@@ -104,7 +112,7 @@ rm -rf "$tmp_export_dir"
 mkdir -p "$tmp_export_dir"
 (
   cd "$tmp_export_dir"
-  "$viewer_cli_cmd" export "$archive_dir" >/dev/null
+  "$viewer_python" "$viewer_wrapper" export "$archive_dir" >/dev/null
 )
 
 generated_html="$(find "$tmp_export_dir" -maxdepth 1 -type f -name '*.html' | head -n 1)"
