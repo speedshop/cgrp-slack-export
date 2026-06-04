@@ -1,4 +1,5 @@
-env_file = ".env"
+[env._]
+file = ".env"
 
 [tools]
 python = "3.12"
