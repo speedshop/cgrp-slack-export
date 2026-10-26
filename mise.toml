@@ -4,6 +4,7 @@ file = ".env"
 [tools]
 python = "3.12"
 awscli = "2"
+jactionlint = "2.2.0"
 
 [tasks.build]
 description = "Build dist outputs from archive/"
@@ -19,6 +20,15 @@ run = "./lib/clean.sh \"$@\""
 description = "Fetch recent Slack history from the Web API as an export directory"
 dir = "{{config_root}}"
 run = "./lib/fetch.py \"$@\""
+
+[tasks.lint]
+description = "Run all linters"
+depends = ["lint:actions"]
+
+[tasks."lint:actions"]
+description = "Check GitHub Actions workflows"
+sources = [".github/workflows/*.yml", ".github/workflows/*.yaml", ".github/jactionlint.yaml"]
+run = "jactionlint --strict-exit"
 
 [tasks.merge]
 description = "Merge a Slack export into archive/"
