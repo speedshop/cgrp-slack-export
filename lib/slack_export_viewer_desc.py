@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 
+import atexit
 import glob
 import io
 import json
+import logging
 import os
 import sys
+import traceback
+from collections import Counter
 from copy import deepcopy
 from html import escape
 from html.parser import HTMLParser
@@ -14,6 +18,32 @@ from slackviewer.formatter import SlackFormatter
 from slackviewer.main import main
 from slackviewer.message import Message
 from slackviewer.reader import Reader
+
+
+class CountingHandler(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.counts = Counter()
+
+    def emit(self, record):
+        self.counts[record.levelname] += 1
+
+
+def report_suppressed_logs(handler):
+    if handler.counts:
+        summary = ", ".join(f"{count} {level}" for level, count in sorted(handler.counts.items()))
+        print(f"Suppressed slack-export-viewer log records: {summary}", file=sys.stderr)
+
+
+def excepthook_without_message(exc_type, exc, tb):
+    traceback.print_tb(tb)
+    print(f"{exc_type.__name__} (message suppressed)", file=sys.stderr)
+
+
+log_counter = CountingHandler()
+logging.getLogger().addHandler(log_counter)
+atexit.register(report_suppressed_logs, log_counter)
+sys.excepthook = excepthook_without_message
 
 
 ALLOWED_HTML_TAGS = {

@@ -1,9 +1,12 @@
 [env._]
 file = ".env"
 
+[settings]
+locked = true
+
 [tools]
-python = "3.12"
-awscli = "2"
+python = "3.12.15"
+awscli = "2.34.1"
 jactionlint = "2.2.0"
 
 [tasks.build]

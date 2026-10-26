@@ -16,8 +16,10 @@ license_dist_source="$project_root/LICENSE-DIST"
 license_target="$dist_dir/LICENSE"
 viewer_venv="$project_root/.venv-sev"
 viewer_submodule="$project_root/vendor/slack-export-viewer"
-local_viewer="$viewer_venv/bin/slack-export-viewer"
-local_viewer_cli="$viewer_venv/bin/slack-export-viewer-cli"
+viewer_python="$viewer_venv/bin/python"
+viewer_wrapper="$project_root/lib/slack_export_viewer_desc.py"
+requirements_lock="$project_root/lib/requirements.lock"
+installed_lock="$viewer_venv/requirements.lock"
 tmp_export_dir=""
 force_build=0
 
@@ -98,43 +100,18 @@ if [ "$force_build" -eq 0 ] && build_is_current; then
   exit 0
 fi
 
-viewer_cmd=""
-viewer_cli_cmd=""
-viewer_python=""
-viewer_wrapper="$project_root/lib/slack_export_viewer_desc.py"
-
-if [ -x "$local_viewer" ]; then
-  viewer_cmd="$local_viewer"
-  viewer_python="$viewer_venv/bin/python"
-elif command -v slack-export-viewer >/dev/null 2>&1; then
-  viewer_cmd="$(command -v slack-export-viewer)"
-  IFS= read -r viewer_python_shebang < "$viewer_cmd"
-  viewer_python="${viewer_python_shebang#\#!}"
-fi
-
-if [ -x "$local_viewer_cli" ]; then
-  viewer_cli_cmd="$local_viewer_cli"
-elif command -v slack-export-viewer-cli >/dev/null 2>&1; then
-  viewer_cli_cmd="$(command -v slack-export-viewer-cli)"
-fi
-
-if [ -z "$viewer_cmd" ] || [ -z "$viewer_cli_cmd" ]; then
+if [ ! -x "$viewer_python" ] || ! cmp -s "$requirements_lock" "$installed_lock"; then
   command -v python3 >/dev/null 2>&1 || die "python3 is required to bootstrap local viewer"
 
   log "Bootstrapping local slack-export-viewer virtualenv"
+  rm -rf "$viewer_venv"
   python3 -m venv "$viewer_venv"
-  "$viewer_venv/bin/python" -m pip install --upgrade pip >/dev/null
-  "$viewer_venv/bin/python" -m pip install -e "$viewer_submodule"
-
-  viewer_cmd="$local_viewer"
-  viewer_cli_cmd="$local_viewer_cli"
-  viewer_python="$viewer_venv/bin/python"
+  "$viewer_python" -m pip install --quiet --disable-pip-version-check --require-hashes --only-binary :all: -r "$requirements_lock"
+  cp "$requirements_lock" "$installed_lock"
 fi
 
-[ -x "$viewer_cmd" ] || die "slack-export-viewer not found"
-[ -x "$viewer_cli_cmd" ] || die "slack-export-viewer-cli not found"
-[ -x "$viewer_python" ] || die "Could not determine slack-export-viewer python interpreter"
 [ -f "$viewer_wrapper" ] || die "Missing viewer wrapper: $viewer_wrapper"
+export PYTHONPATH="$viewer_submodule"
 
 log "Building static viewer site"
 log "Output: $dist_dir"

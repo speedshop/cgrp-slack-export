@@ -40,8 +40,10 @@ Fill in real values for:
 
 1. `mise run state -- pull` restores `archive/` from `s3://railsperf-exports/state/archive.tar.gz`
 2. `mise run fetch -- <dir>` pulls the previous month of public channel history from the Slack Web API
-3. `mise run publish -- <dir>` merges, builds, and uploads `railsperf-export-latest.zip`
+3. `mise run merge`, `mise run build`, and `mise run upload` publish `railsperf-export-latest.zip`
 4. `mise run state -- push` saves the updated `archive/` back to R2
+
+Each secret is scoped to the steps that need it. Tools are installed from `mise.lock` with checksums, and the viewer's Python dependencies from the hash-locked `lib/requirements.lock`. Viewer log records and exception messages are suppressed so message content never reaches the public Actions log, and `mise run upload` refuses to ship a `dist/` containing Slack `xoxe-` file tokens.
 
 Required repository secrets: `SLACK_TOKEN`, `R2_ACCOUNT_ID`, `R2_UPLOAD_ACCESS_KEY_ID`, `R2_UPLOAD_SECRET_ACCESS_KEY`.
 
@@ -56,7 +58,6 @@ oauth_config:
       - channels:history
       - channels:read
       - users:read
-      - users:read.email
 settings:
   org_deploy_enabled: false
   socket_mode_enabled: false

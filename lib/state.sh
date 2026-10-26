@@ -55,7 +55,18 @@ case "$1" in
     [ ! -e "$archive_dir" ] || die "archive/ already exists; move it aside before pulling"
     log "Downloading $state_uri"
     r2_aws s3 cp "$state_uri" "$tarball"
-    tar -xzf "$tarball" -C "$project_root"
+    python3 - "$tarball" "$project_root" <<'PY'
+import sys
+import tarfile
+
+with tarfile.open(sys.argv[1], "r:gz") as tar:
+    members = tar.getmembers()
+    for member in members:
+        parts = member.name.split("/")
+        if parts[0] != "archive" or ".." in parts or not (member.isfile() or member.isdir()):
+            raise SystemExit(f"Error: unexpected entry in state tarball: {member.name}")
+    tar.extractall(sys.argv[2], members=members, filter="data")
+PY
     [ -d "$archive_dir" ] || die "State tarball did not contain archive/"
     log "Restored archive/"
     ;;

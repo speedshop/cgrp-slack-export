@@ -4,6 +4,7 @@ import re
 import sys
 from pathlib import Path
 
+SLACK_FILE_TOKEN = re.compile(r'(\?|&amp;|&)(?:t|token)=xoxe-[A-Za-z0-9-]+(&amp;|&)?')
 USER_AVATAR_IMG = re.compile(r'\s*<img[^>]*class="user_icon(?:_reply)?"[^>]*>\s*', re.IGNORECASE)
 USER_AVATAR_PLACEHOLDER = re.compile(r'\s*<div[^>]*class="user_icon(?:_reply)?"[^>]*></div>\s*', re.IGNORECASE)
 PRINT_ONLY_NODE = re.compile(
@@ -24,7 +25,12 @@ PRINT_ONLY_CSS_RULE = re.compile(
 )
 
 
+def strip_file_token(match: re.Match) -> str:
+    return match.group(1) if match.group(2) else ""
+
+
 def slim_html(text: str) -> str:
+    text = SLACK_FILE_TOKEN.sub(strip_file_token, text)
     text = USER_AVATAR_IMG.sub("\n", text)
     text = USER_AVATAR_PLACEHOLDER.sub("\n", text)
     text = PRINT_ONLY_NODE.sub("\n", text)

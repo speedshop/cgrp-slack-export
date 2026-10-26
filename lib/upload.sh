@@ -83,6 +83,7 @@ fi
 [ -d "$markdown_dir" ] || die "Missing dist output: $markdown_dir"
 [ -s "$readme_path" ] || die "Missing dist output: $readme_path"
 [ -s "$license_path" ] || die "Missing dist output: $license_path"
+! grep -rqF 'xoxe-' "$dist_dir" || die "dist/ contains Slack file tokens (xoxe-); rebuild with mise run build -- --force"
 
 bucket="${R2_BUCKET:-railsperf-exports}"
 object_key="${R2_OBJECT_KEY:-railsperf-export-latest.zip}"
