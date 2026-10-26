@@ -2,7 +2,6 @@ import importlib.util
 import json
 import os
 import re
-import shutil
 import subprocess
 import tempfile
 import unittest
@@ -12,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 IMPORTS_DIR = ROOT / "imports"
+VIEWER_ENV = {**os.environ, "PYTHONPATH": str(ROOT / "vendor" / "slack-export-viewer")}
 DATE_FILE = re.compile(r"(?:.*/)?([^/]+)/(\d{4}-\d{2}-\d{2})\.json$")
 
 
@@ -58,20 +58,10 @@ def collect_boundaries(zip_paths):
 
 def slack_export_viewer_python():
     local_python = ROOT / ".venv-sev" / "bin" / "python"
-    if local_python.exists():
-        return str(local_python)
+    if not local_python.exists():
+        raise AssertionError("Viewer virtualenv missing; run: mise run build")
 
-    viewer = shutil.which("slack-export-viewer")
-    if not viewer:
-        raise AssertionError("slack-export-viewer is not installed")
-
-    with open(viewer, "r", encoding="utf-8") as handle:
-        shebang = handle.readline().strip()
-
-    if not shebang.startswith("#!"):
-        raise AssertionError(f"Could not determine python interpreter for {viewer}")
-
-    return shebang[2:]
+    return str(local_python)
 
 
 def merge_imports_into(archive_dir: Path, zip_paths):
@@ -101,6 +91,7 @@ def build_html_into(archive_dir: Path, dist_dir: Path):
             str(dist_dir),
             "--no-browser",
         ],
+        env=VIEWER_ENV,
         check=True,
         cwd=ROOT,
         capture_output=True,
@@ -110,6 +101,7 @@ def build_html_into(archive_dir: Path, dist_dir: Path):
     with tempfile.TemporaryDirectory() as export_tmp:
         subprocess.run(
             [viewer_python, str(wrapper), "export", str(archive_dir)],
+            env=VIEWER_ENV,
             check=True,
             cwd=export_tmp,
             capture_output=True,
@@ -142,6 +134,7 @@ def html_timestamp(message):
 def run_in_viewer_python(script: str) -> str:
     result = subprocess.run(
         [slack_export_viewer_python(), "-c", script],
+        env=VIEWER_ENV,
         check=True,
         cwd=ROOT,
         capture_output=True,
