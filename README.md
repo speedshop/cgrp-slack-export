@@ -34,7 +34,42 @@ Fill in real values for:
 
 ## 3) Monthly workflow
 
-### One-shot publish (recommended)
+### Automated (GitHub Actions)
+
+`.github/workflows/monthly-publish.yml` runs at 09:00 UTC on the 1st of every month (and on demand via "Run workflow"):
+
+1. `mise run state -- pull` restores `archive/` from `s3://railsperf-exports/state/archive.tar.gz`
+2. `mise run fetch -- <dir>` pulls the previous month of public channel history from the Slack Web API
+3. `mise run publish -- <dir>` merges, builds, and uploads `railsperf-export-latest.zip`
+4. `mise run state -- push` saves the updated `archive/` back to R2
+
+Required repository secrets: `SLACK_TOKEN`, `R2_ACCOUNT_ID`, `R2_UPLOAD_ACCESS_KEY_ID`, `R2_UPLOAD_SECRET_ACCESS_KEY`.
+
+`SLACK_TOKEN` is a user token (`xoxp-…`) from an internal Slack app created from this manifest and installed to the workspace:
+
+```yaml
+display_information:
+  name: Slack Export Archiver
+oauth_config:
+  scopes:
+    user:
+      - channels:history
+      - channels:read
+      - users:read
+      - users:read.email
+settings:
+  org_deploy_enabled: false
+  socket_mode_enabled: false
+  token_rotation_enabled: false
+```
+
+Seed the state once from a machine with an up-to-date `archive/`:
+
+```bash
+mise run state -- push
+```
+
+### One-shot publish from a manual export
 
 ```bash
 mise run publish -- imports/monthly-2026-05.zip
@@ -68,6 +103,13 @@ These files are structured for local indexing tools like qmd: real headings, sma
    - `R2_ACCOUNT_ID`
    - `R2_UPLOAD_ACCESS_KEY_ID`
    - `R2_UPLOAD_SECRET_ACCESS_KEY`
+
+## Fetch behavior
+
+- writes the same layout as a Slack export: `users.json`, `channels.json`, `<channel>/<YYYY-MM-DD>.json`
+- day files are bucketed in `America/Los_Angeles`, matching Slack's exports
+- includes thread replies posted in the window to threads started up to 90 days earlier, and refreshes those parents' `replies` lists
+- `--since YYYY-MM-DD` overrides the default start (first day of the previous month)
 
 ## Merge behavior
 

@@ -1,0 +1,33 @@
+name: Monthly publish
+
+on:
+  schedule:
+    - cron: "0 9 1 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monthly-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      SLACK_TOKEN: ${{ secrets.SLACK_TOKEN }}
+      R2_ACCOUNT_ID: ${{ secrets.R2_ACCOUNT_ID }}
+      R2_UPLOAD_ACCESS_KEY_ID: ${{ secrets.R2_UPLOAD_ACCESS_KEY_ID }}
+      R2_UPLOAD_SECRET_ACCESS_KEY: ${{ secrets.R2_UPLOAD_SECRET_ACCESS_KEY }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          submodules: recursive
+          persist-credentials: false
+      - uses: jdx/mise-action@c2a87611a18de5b3828c5652fe268e992400cb5c # v4.3.0
+      - run: mise run state -- pull
+      - run: mise run fetch -- "$RUNNER_TEMP/slack-fetch"
+      - run: mise run publish -- "$RUNNER_TEMP/slack-fetch"
+      - run: mise run state -- push

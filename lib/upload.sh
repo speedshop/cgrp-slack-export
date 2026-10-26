@@ -18,6 +18,8 @@ bundle_root="railsperf-export-latest"
 
 # shellcheck disable=SC1091
 source "$project_root/lib/load-env.sh"
+# shellcheck disable=SC1091
+source "$project_root/lib/r2.sh"
 load_env_file "$project_root/.env"
 
 run_build=0
@@ -125,26 +127,7 @@ if [ -n "${R2_PRESIGNED_PUT_URL:-}" ]; then
   exit 0
 fi
 
-command -v aws >/dev/null 2>&1 || die "aws CLI is required for direct R2 upload"
-
-r2_account_id="${R2_ACCOUNT_ID:-${CLOUDFLARE_ACCOUNT_ID:-}}"
-upload_access_key="${R2_UPLOAD_ACCESS_KEY_ID:-${AWS_ACCESS_KEY_ID:-}}"
-upload_secret_key="${R2_UPLOAD_SECRET_ACCESS_KEY:-${AWS_SECRET_ACCESS_KEY:-}}"
-upload_session_token="${R2_UPLOAD_SESSION_TOKEN:-${AWS_SESSION_TOKEN:-}}"
-aws_region="${AWS_REGION:-${AWS_DEFAULT_REGION:-auto}}"
-
-[ -n "$r2_account_id" ] || die "Missing R2_ACCOUNT_ID (or CLOUDFLARE_ACCOUNT_ID)"
-[ -n "$upload_access_key" ] || die "Missing R2_UPLOAD_ACCESS_KEY_ID (or AWS_ACCESS_KEY_ID)"
-[ -n "$upload_secret_key" ] || die "Missing R2_UPLOAD_SECRET_ACCESS_KEY (or AWS_SECRET_ACCESS_KEY)"
-
 log "Uploading to r2://$bucket/$object_key"
-AWS_ACCESS_KEY_ID="$upload_access_key" \
-AWS_SECRET_ACCESS_KEY="$upload_secret_key" \
-AWS_SESSION_TOKEN="$upload_session_token" \
-AWS_REGION="$aws_region" \
-AWS_DEFAULT_REGION="$aws_region" \
-AWS_EC2_METADATA_DISABLED=true \
-aws s3 cp "$artifact_path" "s3://$bucket/$object_key" \
-  --endpoint-url "https://${r2_account_id}.r2.cloudflarestorage.com"
+r2_aws s3 cp "$artifact_path" "s3://$bucket/$object_key"
 
 log "Upload complete"

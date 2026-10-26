@@ -15,6 +15,11 @@ description = "Clean generated artifacts"
 dir = "{{config_root}}"
 run = "./lib/clean.sh \"$@\""
 
+[tasks.fetch]
+description = "Fetch recent Slack history from the Web API as an export directory"
+dir = "{{config_root}}"
+run = "./lib/fetch.py \"$@\""
+
 [tasks.merge]
 description = "Merge a Slack export into archive/"
 dir = "{{config_root}}"
@@ -34,6 +39,11 @@ run = "./lib/serve.sh \"$@\""
 description = "Install/check tools and initialize submodules"
 dir = "{{config_root}}"
 run = "./lib/setup.sh \"$@\""
+
+[tasks.state]
+description = "Pull or push archive/ state in R2"
+dir = "{{config_root}}"
+run = "./lib/state.sh \"$@\""
 
 [tasks.upload]
 description = "Package dist/ and upload to R2"
